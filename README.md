@@ -2,13 +2,17 @@
   <img src="public/logo.svg" alt="Medusa POS Logo" width="220" />
 </p>
 
-# Medusa POS
+# Tilltap POS Pilot
 
 [![CI](https://github.com/narisolutions/medusa-pos/actions/workflows/release.yml/badge.svg)](https://github.com/narisolutions/medusa-pos/actions/workflows/release.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/narisolutions/medusa-pos)](https://github.com/narisolutions/medusa-pos/releases/latest)
 [![License](https://img.shields.io/github/license/narisolutions/medusa-pos)](LICENSE)
 
-Cross-platform POS app for Medusa built with React + Tauri 2.
+Ifkafin's controlled Tilltap QR Pay pilot, built as a thin fork of Nari Solutions' Medusa POS.
+
+The original project is available at [narisolutions/medusa-pos](https://github.com/narisolutions/medusa-pos). This fork preserves its Apache-2.0 license and adds an asynchronous `pp_tilltap_default` checkout that renders the provider's QR URL and never falls back to cashier-asserted `markAsPaid` behavior.
+
+> **Sandbox pilot only.** Payment evidence must not release goods. The paired Medusa backend blocks fulfillment and completion for Tilltap orders.
 
 > This project is under active development. APIs, behavior, and UX may change.
 

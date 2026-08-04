@@ -6,6 +6,7 @@ import { formatPrice } from "@/utils/helpers";
 import constants from "@/utils/constants";
 import { useTranslation } from "@/i18n";
 import { useRecordPayment } from "./hooks";
+import TilltapPayment from "@/components/checkout/payment-dialog/tilltap-payment";
 
 interface Props {
   isOpen: boolean;
@@ -22,19 +23,28 @@ const RecordPaymentDialog: React.FC<Props> = ({ isOpen, onClose, order }) => {
     total,
     currency,
     isProcessing,
+    tilltapPayment,
     handleConfirm,
+    handleCheckTilltapPayment,
   } = useRecordPayment(order, onClose);
 
   const displayCurrency = currency || constants.CHECKOUT_CONFIG.CURRENCY;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !isProcessing && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className={tilltapPayment ? "max-w-4xl" : "max-w-md"}>
         <DialogTitle className="text-2xl font-semibold text-fg text-center">
           {t("orders.record_payment")}
         </DialogTitle>
 
-        <div className="space-y-6 py-4">
+        {tilltapPayment ? (
+          <TilltapPayment
+            payment={tilltapPayment}
+            isProcessing={isProcessing}
+            onCheckStatus={handleCheckTilltapPayment}
+            onClose={onClose}
+          />
+        ) : <><div className="space-y-6 py-4">
           <div className="bg-surface-muted border border-theme-border rounded-lg p-4 text-center">
             <div className="text-xs font-semibold text-fg-subtle uppercase tracking-wider mb-1">
               {t("checkout.amount_due_label")}
@@ -85,7 +95,7 @@ const RecordPaymentDialog: React.FC<Props> = ({ isOpen, onClose, order }) => {
               ? t("common.processing")
               : t("orders.record_payment")}
           </Button>
-        </div>
+        </div></>}
       </DialogContent>
     </Dialog>
   );

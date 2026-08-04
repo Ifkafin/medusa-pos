@@ -5,6 +5,66 @@ import { AdminOrder } from "@medusajs/types";
 import storage from "@/utils/storage";
 import { handleErrorToast } from "@/utils/helpers";
 
+const TILLTAP_PROVIDER_ID = "pp_tilltap_default";
+
+export type TilltapPaymentPresentation = {
+  orderId: string;
+  collectionId: string;
+  sessionId: string;
+  checkoutUrl: string;
+  statusUrl: string;
+  expiresAt: number;
+  tilltapStatus: string;
+  captureBlockedReason?: string;
+};
+
+export type PaymentProcessingResult =
+  | { kind: "settled" }
+  | { kind: "pending"; presentation: TilltapPaymentPresentation };
+
+export type TilltapRefreshResult = {
+  presentation: TilltapPaymentPresentation;
+  isAuthorized: boolean;
+  paymentStatus: string;
+};
+
+const requiredString = (value: unknown, field: string): string => {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`Tilltap did not return ${field}`);
+  }
+  return value;
+};
+
+export const tilltapPresentation = (
+  orderId: string,
+  collectionId: string,
+  session: { id: string; data: Record<string, unknown> }
+): TilltapPaymentPresentation => {
+  const checkoutUrl = requiredString(session.data.checkout_url, "a checkout URL");
+  const statusUrl = requiredString(session.data.status_url, "a status URL");
+  const parsedCheckoutUrl = new URL(checkoutUrl);
+  const parsedStatusUrl = new URL(statusUrl);
+  if (parsedCheckoutUrl.protocol !== "https:" || parsedStatusUrl.protocol !== "https:") {
+    throw new Error("Tilltap checkout presentation must use HTTPS");
+  }
+  const expiresAt = Number(session.data.expires_at);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) {
+    throw new Error("Tilltap returned an invalid or expired checkout");
+  }
+  return {
+    orderId,
+    collectionId,
+    sessionId: session.id,
+    checkoutUrl,
+    statusUrl,
+    expiresAt,
+    tilltapStatus: requiredString(session.data.tilltap_status, "a checkout status"),
+    ...(typeof session.data.capture_blocked_reason === "string"
+      ? { captureBlockedReason: session.data.capture_blocked_reason }
+      : {}),
+  };
+};
+
 /**
  * Shared order-processing primitives used by both the checkout payment flow
  * and the order-detail "record payment" flow.
@@ -19,14 +79,14 @@ import { handleErrorToast } from "@/utils/helpers";
  */
 const useOrderProcessing = () => {
   const processPaymentCollection = useCallback(
-    async (order: AdminOrder, providerId: string): Promise<void> => {
+    async (order: AdminOrder, providerId: string): Promise<PaymentProcessingResult> => {
       const sdk = getSdk();
 
       if (
         order.payment_status === "captured" ||
         order.payment_status === "authorized"
       ) {
-        return;
+        return { kind: "settled" };
       }
 
       let collectionId: string;
@@ -45,15 +105,34 @@ const useOrderProcessing = () => {
       const { payment_collection: updatedCollection } =
         await sdk.admin.paymentCollection.createPaymentSession(
           collectionId,
-          { provider_id: providerId },
+          {
+            provider_id: providerId,
+            data: {
+              order_id: order.id,
+              order_display_id: order.display_id,
+            },
+          },
           { fields: "*payment_sessions,*payments" }
         );
+
+      if (providerId === TILLTAP_PROVIDER_ID) {
+        const session = updatedCollection.payment_sessions?.find(
+          (candidate) => candidate.provider_id === TILLTAP_PROVIDER_ID
+        );
+        if (!session) {
+          throw new Error("Medusa did not return the Tilltap payment session");
+        }
+        return {
+          kind: "pending",
+          presentation: tilltapPresentation(order.id, collectionId, session),
+        };
+      }
 
       const alreadyCaptured = updatedCollection.payments?.find(
         (p) => !!p.captured_at
       );
       if (alreadyCaptured) {
-        return;
+        return { kind: "settled" };
       }
 
       const pendingPayment = updatedCollection.payments?.find(
@@ -62,7 +141,7 @@ const useOrderProcessing = () => {
 
       if (pendingPayment?.id) {
         await sdk.admin.payment.capture(pendingPayment.id, {});
-        return;
+        return { kind: "settled" };
       }
 
       // Provider didn't auto-authorize — mark as paid. Try the real provider
@@ -83,6 +162,7 @@ const useOrderProcessing = () => {
           order_id: order.id,
         });
       }
+      return { kind: "settled" };
     },
     []
   );
@@ -151,7 +231,45 @@ const useOrderProcessing = () => {
     []
   );
 
-  return { processPaymentCollection, processFulfillment };
+  const refreshTilltapPayment = useCallback(
+    async (current: TilltapPaymentPresentation): Promise<TilltapRefreshResult> => {
+      const sdk = getSdk();
+      const { order, is_authorized: isAuthorized } =
+        await sdk.admin.order.authorizePaymentSession(
+          current.orderId,
+          current.sessionId,
+          {
+            fields:
+              "payment_status,*payment_collections.payment_sessions,*payment_collections.payments",
+          }
+        );
+      const session = order.payment_collections
+        ?.flatMap((collection) => collection.payment_sessions ?? [])
+        .find((candidate) => candidate.id === current.sessionId);
+      if (!session) {
+        throw new Error("Medusa did not return the Tilltap payment session");
+      }
+      const data = session.data ?? {};
+      return {
+        presentation: {
+          ...current,
+          tilltapStatus:
+            typeof data.tilltap_status === "string"
+              ? data.tilltap_status
+              : current.tilltapStatus,
+          captureBlockedReason:
+            typeof data.capture_blocked_reason === "string"
+              ? data.capture_blocked_reason
+              : undefined,
+        },
+        isAuthorized,
+        paymentStatus: order.payment_status,
+      };
+    },
+    []
+  );
+
+  return { processPaymentCollection, processFulfillment, refreshTilltapPayment };
 };
 
 export { useOrderProcessing };

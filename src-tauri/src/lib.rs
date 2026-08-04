@@ -332,7 +332,7 @@ fn print_test_page<T: Driver>(
     map_printer_error(printer.bold(false))?;
     map_printer_error(printer.underline(UnderlineMode::None))?;
 
-    map_printer_error(printer.writeln("Medusa POS"))?;
+    map_printer_error(printer.writeln("Tilltap POS Pilot"))?;
     if let Some(v) = app_version.filter(|s| !s.is_empty()) {
         map_printer_error(printer.writeln(&format!("Version {}", v)))?;
     }

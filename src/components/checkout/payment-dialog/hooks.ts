@@ -13,7 +13,10 @@ import { useRegister } from "@/context/register";
 import { PaymentMethod } from "@/types/utils";
 import { useCheckout } from "../hooks";
 import { useQueryStore } from "@/hooks/queries/useQueryStore";
-import { useOrderProcessing } from "@/hooks/order/useOrderProcessing";
+import {
+  useOrderProcessing,
+  type TilltapPaymentPresentation,
+} from "@/hooks/order/useOrderProcessing";
 import { getPaymentMethods, getMethodType } from "@/utils/settings/store/metadata";
 import { getCashRounding, roundCashAmount } from "@/utils/settings/preferences";
 import constants from "@/utils/constants";
@@ -217,6 +220,8 @@ const usePaymentModal = (
     useState(false);
   // Total snapshotted at submit — clearing draftOrderId mid-flow would show 0.00 otherwise.
   const [frozenTotal, setFrozenTotal] = useState<number | null>(null);
+  const [tilltapPayment, setTilltapPayment] =
+    useState<TilltapPaymentPresentation | null>(null);
 
   const { printOrderReceipt, openCashDrawer, getDefaultPrinter } = usePrinterService();
   const clearItems = useCartStore((state) => state.clearItems);
@@ -260,12 +265,15 @@ const usePaymentModal = (
     billCounts,
     quickAmounts,
   } = useCashPayment(cashTotal, isCashType);
-  const { processPaymentCollection, processFulfillment } = useOrderProcessing();
+  const { processPaymentCollection, processFulfillment, refreshTilltapPayment } =
+    useOrderProcessing();
 
   // While processing, the draft order is cleared (so its total reads 0). Show the
   // frozen snapshot taken at submit time so the amount never flashes to 0.00.
   const displayTotal =
-    isProcessing && frozenTotal != null ? frozenTotal : calculations.total;
+    (isProcessing || tilltapPayment) && frozenTotal != null
+      ? frozenTotal
+      : calculations.total;
 
   // Rounded cash amount to collect (cash + rounding on); card shows exact total.
   const cashDue = roundingActive ? roundCashAmount(displayTotal) : displayTotal;
@@ -408,7 +416,12 @@ const usePaymentModal = (
         // Step 4: Process payment collection
         let finalOrder = order;
         try {
-          await processPaymentCollection(order, selectedPaymentMethod);
+          const paymentResult = await processPaymentCollection(order, selectedPaymentMethod);
+          if (paymentResult.kind === "pending") {
+            setTilltapPayment(paymentResult.presentation);
+            toast.info("Tilltap checkout created. Ask the customer to scan the QR code.");
+            return null;
+          }
         } catch (paymentError) {
           // Surface the real backend error so capture failures are diagnosable.
           void logger.error(`processPaymentCollection failed: ${safeStringify(paymentError)}`);
@@ -596,12 +609,61 @@ const usePaymentModal = (
 
   // Handle modal close
   const handleClose = useCallback(() => {
+    if (tilltapPayment) {
+      // The draft has already become a real Medusa order. Never leave its items
+      // in the local cart where they could be rung a second time.
+      clearItems();
+      setPaymentMethod(undefined);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+    }
     resetCashState();
     setFrozenTotal(null);
+    setTilltapPayment(null);
     setShowConfirmation(false);
     setShowPayLaterConfirmation(false);
     onClose?.();
-  }, [resetCashState, onClose]);
+  }, [tilltapPayment, clearItems, setPaymentMethod, resetCashState, onClose]);
+
+  const handleCheckTilltapPayment = useCallback(async (): Promise<void> => {
+    if (!tilltapPayment || submissionRef.current) return;
+
+    submissionRef.current = true;
+    setIsProcessing(true);
+    try {
+      const refreshed = await refreshTilltapPayment(tilltapPayment);
+      setTilltapPayment(refreshed.presentation);
+      const { tilltapStatus } = refreshed.presentation;
+
+      if (refreshed.isAuthorized || refreshed.paymentStatus === "captured") {
+        // The controlled backend intentionally blocks fulfillment and order
+        // completion for this pilot, even after sandbox evidence is captured.
+        clearItems();
+        setPaymentMethod(undefined);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+        toast.success("Tilltap sandbox payment verified. Goods release remains blocked.");
+        playSuccessSound();
+        return;
+      }
+
+      if (tilltapStatus === "PAID") {
+        toast.warning(
+          "Tilltap reports sandbox payment evidence, but Medusa correctly kept the order awaiting payment."
+        );
+      } else if (tilltapStatus === "REVIEW") {
+        toast.warning("Tilltap requires operator review. Do not retry or release goods.");
+      } else {
+        toast.info(`Tilltap checkout is ${tilltapStatus.toLowerCase().replace(/_/g, " ")}.`);
+      }
+    } catch (error) {
+      playErrorSound();
+      handleErrorToast(
+        error instanceof Error ? error.message : "Could not check Tilltap payment status."
+      );
+    } finally {
+      submissionRef.current = false;
+      setIsProcessing(false);
+    }
+  }, [tilltapPayment, refreshTilltapPayment, clearItems, setPaymentMethod]);
 
   // Open the pay-later confirmation dialog.
   const handleDeliverPayLaterClick = useCallback(() => {
@@ -619,7 +681,8 @@ const usePaymentModal = (
 
   // Handle complete button click
   const handleCompleteClick = useCallback(() => {
-    const isCardPayment = !isCashType;
+    const isTilltapPayment = selectedPaymentMethod === "pp_tilltap_default";
+    const isCardPayment = !isCashType && !isTilltapPayment;
 
     if (isCardPayment) {
       setShowConfirmation(true);
@@ -630,7 +693,7 @@ const usePaymentModal = (
         }
       });
     }
-  }, [isCashType, handleProcessPayment, handleClose]);
+  }, [isCashType, selectedPaymentMethod, handleProcessPayment, handleClose]);
 
   // Handle complete payment with modal close (legacy, kept for backwards compatibility)
   const handleCompletePayment = useCallback(async (): Promise<void> => {
@@ -660,6 +723,7 @@ const usePaymentModal = (
     draftOrder,
     showConfirmation,
     showPayLaterConfirmation,
+    tilltapPayment,
 
     // Calculations
     ...calculations,
@@ -688,6 +752,7 @@ const usePaymentModal = (
     handleCompletePayment,
     handleCompleteClick,
     handleConfirmPayment,
+    handleCheckTilltapPayment,
     setShowConfirmation,
     handleDeliverPayLater,
     handleDeliverPayLaterClick,

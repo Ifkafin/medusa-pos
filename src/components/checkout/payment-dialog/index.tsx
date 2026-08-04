@@ -13,6 +13,7 @@ import ConfirmationDialog from "./confirmation-dialog";
 import PayLaterConfirmationDialog from "./pay-later-confirmation-dialog";
 import { CreditCard } from "lucide-react";
 import { useTranslation } from "@/i18n";
+import TilltapPayment from "./tilltap-payment";
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -52,6 +53,8 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
     isCashPayment,
     draftOrder,
     billCounts,
+    tilltapPayment,
+    handleCheckTilltapPayment,
   } = usePaymentModal(draftOrderId, onClose, isOpen);
 
   const { currency } = useCheckout();
@@ -127,7 +130,14 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
 
           {/* Right: Payment Interface */}
           <div className="flex-1 flex flex-col">
-            {isCashPayment ? (
+            {tilltapPayment ? (
+              <TilltapPayment
+                payment={tilltapPayment}
+                isProcessing={isProcessing}
+                onCheckStatus={handleCheckTilltapPayment}
+                onClose={handleClose}
+              />
+            ) : isCashPayment ? (
               <div className="flex-1 min-h-0 p-8 pb-6">
                 <div className="h-full flex flex-col min-h-0">
                   {/* Scrolls on short screens; the actions below stay pinned and visible. */}
