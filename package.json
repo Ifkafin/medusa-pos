@@ -4,10 +4,10 @@
   "private": false,
   "author": "Nari Solutions",
   "license": "Apache-2.0",
-  "homepage": "https://pos.nari.ge",
+  "homepage": "https://github.com/Ifkafin/medusa-pos",
   "repository": {
     "type": "git",
-    "url": "https://github.com/narisolutions/medusa-pos.git"
+    "url": "https://github.com/Ifkafin/medusa-pos.git"
   },
   "engines": {
     "node": "^20.19.0 || ^22.13.0 || >=24.0.0"
@@ -27,6 +27,8 @@
     "tauri:dev": "tauri dev -- --features devtools",
     "tauri:build": "tauri build",
     "tauri:build:debug": "RUST_LOG=debug tauri build --debug",
+    "build:check": "node scripts/build-fedora.mjs --check",
+    "build:fedora": "node scripts/build-fedora.mjs",
     "android:build:apk": "tauri android build --apk",
     "android:build:apk:debug": "tauri android build --apk -d",
     "android:build:apk:split": "tauri android build --apk --split-per-abi",
@@ -68,6 +70,7 @@
     "i18next": "^26.3.4",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.21.0",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-error-boundary": "^6.1.2",
@@ -83,6 +86,7 @@
     "@eslint/js": "^9.39.3",
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^26.0.1",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.0.4",

@@ -6,7 +6,10 @@ import { queryKeys } from "@/config/query";
 import { getSdk } from "@/config/medusa";
 import { useTranslation } from "@/i18n";
 import { useQueryStore } from "@/hooks/queries/useQueryStore";
-import { useOrderProcessing } from "@/hooks/order/useOrderProcessing";
+import {
+  useOrderProcessing,
+  type TilltapPaymentPresentation,
+} from "@/hooks/order/useOrderProcessing";
 import { getPaymentMethods } from "@/utils/settings/store/metadata";
 import { getOrderPaymentProviderId } from "@/utils/pos/payment";
 import { handleErrorToast } from "@/utils/helpers";
@@ -17,9 +20,11 @@ export const useRecordPayment = (order: AdminOrder, onClose?: () => void) => {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: store } = useQueryStore();
-  const { processPaymentCollection } = useOrderProcessing();
+  const { processPaymentCollection, refreshTilltapPayment } = useOrderProcessing();
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [tilltapPayment, setTilltapPayment] =
+    useState<TilltapPaymentPresentation | null>(null);
 
   const methods = useMemo(() => getPaymentMethods(store), [store]);
 
@@ -42,7 +47,12 @@ export const useRecordPayment = (order: AdminOrder, onClose?: () => void) => {
       const sdk = getSdk();
 
       // Capture the outstanding amount with the chosen provider.
-      await processPaymentCollection(order, selectedMethod);
+      const paymentResult = await processPaymentCollection(order, selectedMethod);
+      if (paymentResult.kind === "pending") {
+        setTilltapPayment(paymentResult.presentation);
+        toast.info("Tilltap checkout created. Ask the customer to scan the QR code.");
+        return;
+      }
 
       // Delivered + now paid → complete (skip if backend auto-completed; non-fatal).
       const isFulfilled =
@@ -71,6 +81,34 @@ export const useRecordPayment = (order: AdminOrder, onClose?: () => void) => {
     }
   }, [selectedMethod, order, processPaymentCollection, queryClient, onClose, t]);
 
+  const handleCheckTilltapPayment = useCallback(async () => {
+    if (!tilltapPayment || isProcessing) return;
+    setIsProcessing(true);
+    try {
+      const refreshed = await refreshTilltapPayment(tilltapPayment);
+      setTilltapPayment(refreshed.presentation);
+      if (refreshed.isAuthorized || refreshed.paymentStatus === "captured") {
+        toast.success("Tilltap sandbox payment verified. Goods release remains blocked.");
+      } else if (refreshed.presentation.tilltapStatus === "PAID") {
+        toast.warning("Sandbox evidence received; Medusa kept the order awaiting payment.");
+      } else {
+        toast.info(
+          `Tilltap checkout is ${refreshed.presentation.tilltapStatus
+            .toLowerCase()
+            .replace(/_/g, " ")}.`
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.orders.detail(order.id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+    } catch (error) {
+      handleErrorToast(
+        error instanceof Error ? error.message : "Could not check Tilltap payment status."
+      );
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [tilltapPayment, isProcessing, refreshTilltapPayment, queryClient, order.id]);
+
   return {
     methods,
     selectedMethod,
@@ -78,6 +116,8 @@ export const useRecordPayment = (order: AdminOrder, onClose?: () => void) => {
     total,
     currency,
     isProcessing,
+    tilltapPayment,
     handleConfirm,
+    handleCheckTilltapPayment,
   };
 };

@@ -2,13 +2,17 @@
   <img src="public/logo.svg" alt="Medusa POS Logo" width="220" />
 </p>
 
-# Medusa POS
+# Tilltap POS Pilot
 
 [![CI](https://github.com/narisolutions/medusa-pos/actions/workflows/release.yml/badge.svg)](https://github.com/narisolutions/medusa-pos/actions/workflows/release.yml)
 [![GitHub Release](https://img.shields.io/github/v/release/narisolutions/medusa-pos)](https://github.com/narisolutions/medusa-pos/releases/latest)
 [![License](https://img.shields.io/github/license/narisolutions/medusa-pos)](LICENSE)
 
-Cross-platform POS app for Medusa built with React + Tauri 2.
+Ifkafin's controlled Tilltap QR Pay pilot, built as a thin fork of Nari Solutions' Medusa POS.
+
+The original project is available at [narisolutions/medusa-pos](https://github.com/narisolutions/medusa-pos). This fork preserves its Apache-2.0 license and adds an asynchronous `pp_tilltap_default` checkout that renders the provider's QR URL and never falls back to cashier-asserted `markAsPaid` behavior.
+
+> **Sandbox pilot only.** Payment evidence must not release goods. The paired Medusa backend blocks fulfillment and completion for Tilltap orders.
 
 > This project is under active development. APIs, behavior, and UX may change.
 
@@ -69,6 +73,41 @@ Tauri storage/config files on first setup, so `yarn dev` is only for limited UI 
 yarn build
 yarn lint
 yarn typecheck
+```
+
+### Fedora RPM
+
+Install Tauri's Fedora dependencies and the RPM packager once:
+
+```bash
+sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file \
+  libappindicator-gtk3-devel librsvg2-devel libxdo-devel rpm-build
+```
+
+Configure the Medusa deployment that the packaged POS should open by default, validate it, and build the RPM:
+
+```bash
+cp .env.example .env
+# Edit .env and set VITE_BACKEND_URL=https://your-medusa-host.example.com/
+pnpm install --frozen-lockfile
+pnpm build:check
+pnpm test
+pnpm typecheck
+pnpm build:fedora
+```
+
+`build:fedora` loads the ignored `.env`, refuses a missing, invalid, non-HTTPS, or credential-bearing backend URL, checks
+for Rust and `rpmbuild`, builds the web application, and produces an RPM under `src-tauri/target/release/bundle/rpm/`.
+Install the resulting package with:
+
+```bash
+sudo dnf install ./src-tauri/target/release/bundle/rpm/*.rpm
+```
+
+For a quick uninstalled run after any successful Tauri release build:
+
+```bash
+./src-tauri/target/release/medusa-pos
 ```
 
 ## Core Features

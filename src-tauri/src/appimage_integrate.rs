@@ -1,4 +1,4 @@
-//! Self-installs the Medusa POS AppImage into the user's applications menu
+//! Self-installs the Tilltap POS Pilot AppImage into the user's applications menu
 //! on first run.
 //!
 //! Only does anything when the binary is launched as an AppImage (i.e. the
@@ -29,11 +29,11 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 // WM_CLASS must match what the running window reports — verify with
 // `xprop WM_CLASS` once the dev build is running, and update if needed.
 // =========================================================================
-const APP_NAME: &str = "Medusa POS"; // human-readable (dialogs, menu)
-const APP_EXEC_NAME: &str = "MedusaPOS"; // PascalCase, no spaces; AppImage filename
-const APP_SLUG: &str = "medusapos"; // lowercase; used in paths, icon name
-const APP_ID: &str = "ge.nari.medusa-pos"; // reverse-DNS, matches tauri.conf.json
-const WM_CLASS: &str = "Medusa-pos"; // verified via `xprop WM_CLASS` (res_class derived from APP_ID)
+const APP_NAME: &str = "Tilltap POS Pilot"; // human-readable (dialogs, menu)
+const APP_EXEC_NAME: &str = "TilltapPOSPilot"; // PascalCase, no spaces; AppImage filename
+const APP_SLUG: &str = "tilltappospilot"; // lowercase; used in paths, icon name
+const APP_ID: &str = "com.ifkafin.tilltap-pos"; // reverse-DNS, matches tauri.conf.json
+const WM_CLASS: &str = "Tilltap-pos-pilot"; // derived from the fork's application identity
 
 /// Bump when the integration's on-disk layout or state file shape changes.
 /// Add a migration arm in `migrate()` for each step.
