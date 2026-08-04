@@ -75,6 +75,41 @@ yarn lint
 yarn typecheck
 ```
 
+### Fedora RPM
+
+Install Tauri's Fedora dependencies and the RPM packager once:
+
+```bash
+sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file \
+  libappindicator-gtk3-devel librsvg2-devel libxdo-devel rpm-build
+```
+
+Configure the Medusa deployment that the packaged POS should open by default, validate it, and build the RPM:
+
+```bash
+cp .env.example .env
+# Edit .env and set VITE_BACKEND_URL=https://your-medusa-host.example.com/
+pnpm install --frozen-lockfile
+pnpm build:check
+pnpm test
+pnpm typecheck
+pnpm build:fedora
+```
+
+`build:fedora` loads the ignored `.env`, refuses a missing, invalid, non-HTTPS, or credential-bearing backend URL, checks
+for Rust and `rpmbuild`, builds the web application, and produces an RPM under `src-tauri/target/release/bundle/rpm/`.
+Install the resulting package with:
+
+```bash
+sudo dnf install ./src-tauri/target/release/bundle/rpm/*.rpm
+```
+
+For a quick uninstalled run after any successful Tauri release build:
+
+```bash
+./src-tauri/target/release/medusa-pos
+```
+
 ## Core Features
 
 - Checkout UI with barcode scanning, cart, payment dialog
