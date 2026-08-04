@@ -54,5 +54,5 @@ fn main() {
     #[cfg(target_os = "linux")]
     fixup_appimage_wayland();
 
-    medusa_pos_lib::run()
+    tilltap_pos_lib::run()
 }

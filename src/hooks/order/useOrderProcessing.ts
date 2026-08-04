@@ -1,88 +1,79 @@
 import { useCallback } from "react";
 import { getSdk } from "@/config/medusa";
-import { logger, safeStringify } from "@/utils/logger";
 import { AdminOrder } from "@medusajs/types";
 import storage from "@/utils/storage";
 import { handleErrorToast } from "@/utils/helpers";
+import {
+  processPaymentWithStrategy,
+  requireAuthoritativeGoodsRelease,
+  TILLTAP_ATTEMPT_METADATA_KEY,
+  TILLTAP_PROVIDER_ID,
+  type PaymentProcessingResult,
+} from "@/utils/pos/payment/strategies";
+
+const GOODS_RELEASE_FIELDS =
+  "id,payment_status,metadata,*payment_collections.payment_sessions";
 
 /**
  * Shared order-processing primitives used by both the checkout payment flow
  * and the order-detail "record payment" flow.
  *
- * - processPaymentCollection: ensures the order's payment is captured. Reuses an
- *   existing payment collection or creates one, opens a payment session for the
- *   chosen provider, then captures the pending payment. Falls back to markAsPaid
- *   when the provider does not auto-authorize (see project memory
- *   project_payment_provider_flow).
+ * - processPaymentCollection: delegates provider-specific behavior to the payment
+ *   strategy seam. Synchronous providers retain the existing capture/mark-as-paid
+ *   behavior; asynchronous providers return their session without either fallback.
  * - processFulfillment: fulfills + marks delivered (this is what decrements
- *   inventory at the stock location). Errors are non-fatal (surface a toast).
+ *   inventory at the stock location). Errors are surfaced and propagated.
  */
 const useOrderProcessing = () => {
   const processPaymentCollection = useCallback(
-    async (order: AdminOrder, providerId: string): Promise<void> => {
+    async (
+      order: AdminOrder,
+      providerId: string
+    ): Promise<PaymentProcessingResult> => {
       const sdk = getSdk();
 
-      if (
-        order.payment_status === "captured" ||
-        order.payment_status === "authorized"
-      ) {
-        return;
-      }
-
-      let collectionId: string;
-
-      if (order.payment_collections && order.payment_collections.length > 0) {
-        collectionId = order.payment_collections[0].id;
-      } else {
-        const paymentAmount = order.summary?.accounting_total || order.total || 0;
-        const { payment_collection } = await sdk.admin.paymentCollection.create({
-          order_id: order.id,
-          amount: paymentAmount,
-        });
-        collectionId = payment_collection.id;
-      }
-
-      const { payment_collection: updatedCollection } =
-        await sdk.admin.paymentCollection.createPaymentSession(
-          collectionId,
-          { provider_id: providerId },
-          { fields: "*payment_sessions,*payments" }
-        );
-
-      const alreadyCaptured = updatedCollection.payments?.find(
-        (p) => !!p.captured_at
-      );
-      if (alreadyCaptured) {
-        return;
-      }
-
-      const pendingPayment = updatedCollection.payments?.find(
-        (p) => !p.captured_at
-      );
-
-      if (pendingPayment?.id) {
-        await sdk.admin.payment.capture(pendingPayment.id, {});
-        return;
-      }
-
-      // Provider didn't auto-authorize — mark as paid. Try the real provider
-      // first; if it can't authorize (HTTP 422), retry under the system default.
-      // markAsPaid returns an empty body and only throws on a genuine rejection,
-      // so the retry can't double-pay. The real provider is still recoverable from
-      // the payment session via getOrderPaymentProviderId.
-      try {
-        await sdk.admin.paymentCollection.markAsPaid(collectionId, {
-          order_id: order.id,
-          provider_id: providerId,
-        });
-      } catch (markPaidError) {
-        void logger.error(
-          `markAsPaid with provider_id failed; retrying with system default: ${safeStringify(markPaidError)}`
-        );
-        await sdk.admin.paymentCollection.markAsPaid(collectionId, {
-          order_id: order.id,
-        });
-      }
+      return processPaymentWithStrategy(order, providerId, {
+        createCollection: async (orderId, amount) => {
+          const { payment_collection } =
+            await sdk.admin.paymentCollection.create({
+              order_id: orderId,
+              amount,
+            });
+          return payment_collection;
+        },
+        createPaymentSession: async (collectionId, selectedProviderId) => {
+          const { payment_collection } =
+            await sdk.admin.paymentCollection.createPaymentSession(
+              collectionId,
+              { provider_id: selectedProviderId },
+              { fields: "*payment_sessions,*payments" }
+            );
+          return payment_collection;
+        },
+        capturePayment: async (paymentId) => {
+          await sdk.admin.payment.capture(paymentId, {});
+        },
+        markAsPaid: async (collectionId, orderId, selectedProviderId) => {
+          await sdk.admin.paymentCollection.markAsPaid(collectionId, {
+            order_id: orderId,
+            ...(selectedProviderId
+              ? { provider_id: selectedProviderId }
+              : {}),
+          });
+        },
+        persistAsyncAttempt: async (attemptOrder, sessionId) => {
+          await sdk.admin.order.update(attemptOrder.id, {
+            metadata: {
+              ...(attemptOrder.metadata ?? {}),
+              [TILLTAP_ATTEMPT_METADATA_KEY]: {
+                provider_id: TILLTAP_PROVIDER_ID,
+                state: sessionId ? "created" : "prepared",
+                ...(sessionId ? { session_id: sessionId } : {}),
+              },
+            },
+          });
+        },
+      });
     },
     []
   );
@@ -100,6 +91,14 @@ const useOrderProcessing = () => {
       }
 
       try {
+        await requireAuthoritativeGoodsRelease(order, async () => {
+          const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+            order.id,
+            { fields: GOODS_RELEASE_FIELDS }
+          );
+          return refreshedOrder;
+        });
+
         if (order.fulfillments && order.fulfillments.length > 0) {
           const existingFulfillment = order.fulfillments[0];
           await sdk.admin.order.markAsDelivered(
@@ -144,8 +143,9 @@ const useOrderProcessing = () => {
         await sdk.admin.order.markAsDelivered(order.id, fulfillmentId);
       } catch (error) {
         handleErrorToast(
-          `Fulfillment failed (${error instanceof Error ? error.message : "Unknown"}), but order created`
+          `Fulfillment failed: ${error instanceof Error ? error.message : "Unknown"}`
         );
+        throw error;
       }
     },
     []

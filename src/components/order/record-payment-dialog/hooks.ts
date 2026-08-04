@@ -10,6 +10,14 @@ import { useOrderProcessing } from "@/hooks/order/useOrderProcessing";
 import { getPaymentMethods } from "@/utils/settings/store/metadata";
 import { getOrderPaymentProviderId } from "@/utils/pos/payment";
 import { handleErrorToast } from "@/utils/helpers";
+import {
+  canFinalizeOrder,
+  isTilltapOrder,
+  TILLTAP_PROVIDER_ID,
+} from "@/utils/pos/payment/strategies";
+
+const RECORD_PAYMENT_FIELDS =
+  "id,status,payment_status,fulfillment_status,metadata,*payment_collections,*payment_collections.payments,*payment_collections.payment_sessions";
 
 // "Record payment" dialog: captures an outstanding payment on an existing (pay-later)
 // order and completes it once both paid and fulfilled.
@@ -36,20 +44,39 @@ export const useRecordPayment = (order: AdminOrder, onClose?: () => void) => {
       handleErrorToast(t("checkout.select_payment_method"));
       return;
     }
+    if (selectedMethod === TILLTAP_PROVIDER_ID) {
+      handleErrorToast(t("checkout.tilltap.record_payment_blocked"));
+      return;
+    }
 
     setIsProcessing(true);
     try {
       const sdk = getSdk();
 
+      const { order: currentOrder } = await sdk.admin.order.retrieve(order.id, {
+        fields: RECORD_PAYMENT_FIELDS,
+      });
+      if (isTilltapOrder(currentOrder)) {
+        throw new Error(t("checkout.tilltap.record_payment_blocked"));
+      }
+
       // Capture the outstanding amount with the chosen provider.
-      await processPaymentCollection(order, selectedMethod);
+      await processPaymentCollection(currentOrder, selectedMethod);
+      const { order: refreshedOrder } = await sdk.admin.order.retrieve(order.id, {
+        fields: "id,status,payment_status,fulfillment_status",
+      });
+      if (!canFinalizeOrder(refreshedOrder)) {
+        throw new Error(
+          "Medusa has not captured this payment. Keep the order unpaid."
+        );
+      }
 
       // Delivered + now paid → complete (skip if backend auto-completed; non-fatal).
       const isFulfilled =
-        order.fulfillment_status === "fulfilled" ||
-        order.fulfillment_status === "shipped" ||
-        order.fulfillment_status === "delivered";
-      if (isFulfilled && order.status !== "completed") {
+        refreshedOrder.fulfillment_status === "fulfilled" ||
+        refreshedOrder.fulfillment_status === "shipped" ||
+        refreshedOrder.fulfillment_status === "delivered";
+      if (isFulfilled && refreshedOrder.status !== "completed") {
         try {
           await sdk.admin.order.complete(order.id, {});
         } catch {

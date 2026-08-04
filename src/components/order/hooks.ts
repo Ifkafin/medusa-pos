@@ -18,6 +18,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/config/query";
 import { usePrinterService } from "@/hooks/printer/usePrinterService";
 import { classifyFulfillment, classifyOrderShippingMethod } from "@/utils/pos/fulfillment";
+import {
+  canRecordPayment as canRecordPaymentForOrder,
+  canReleaseGoods,
+  requireAuthoritativeGoodsRelease,
+} from "@/utils/pos/payment/strategies";
+
+const GOODS_RELEASE_FIELDS =
+  "id,payment_status,metadata,*payment_collections.payment_sessions";
 
 // Type for fulfillment with extended properties
 type ExtendedFulfillment = Record<string, unknown> & {
@@ -186,6 +194,13 @@ export const useOrder = (order: AdminOrder) => {
     setIsCreatingShipment(true);
     try {
       const sdk = getSdk();
+      await requireAuthoritativeGoodsRelease(order, async () => {
+        const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+          order.id,
+          { fields: GOODS_RELEASE_FIELDS }
+        );
+        return refreshedOrder;
+      });
       await sdk.admin.fulfillment.createShipment(fulfillment.id, {
         labels: [
           {
@@ -227,6 +242,13 @@ export const useOrder = (order: AdminOrder) => {
     setIsPickupConfirmationOpen(false);
     try {
       const sdk = getSdk();
+      await requireAuthoritativeGoodsRelease(order, async () => {
+        const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+          order.id,
+          { fields: GOODS_RELEASE_FIELDS }
+        );
+        return refreshedOrder;
+      });
       await sdk.admin.order.markAsDelivered(order.id, fulfillment.id);
 
       toast.success(t("orders.marked_as_picked_up_success"));
@@ -250,11 +272,13 @@ export const useOrder = (order: AdminOrder) => {
   const isPickupOrder = orderShippingClass.isPickup || !!fulfillmentClass?.isPickup;
 
   const canCreateShipment =
+    canReleaseGoods(order) &&
     fulfillmentStatus === "fulfilled" &&
     !!fulfillmentClass?.isShipping &&
     !!fulfillment?.labels?.[0];
 
   const canMarkAsPickedUp =
+    canReleaseGoods(order) &&
     fulfillmentStatus === "fulfilled" &&
     !!fulfillmentClass?.isPickup;
 
@@ -263,15 +287,7 @@ export const useOrder = (order: AdminOrder) => {
     fulfillmentStatus !== "fulfilled" &&
     fulfillmentStatus !== "delivered";
 
-  // Payment is outstanding and the order is not canceled → allow recording it.
-  const paymentStatus = order.payment_status;
-  const canRecordPayment =
-    order.status !== "canceled" &&
-    (paymentStatus === "not_paid" ||
-      paymentStatus === "awaiting" ||
-      paymentStatus === "requires_action" ||
-      paymentStatus === "partially_authorized" ||
-      paymentStatus === "partially_captured");
+  const canRecordPayment = canRecordPaymentForOrder(order);
 
   return {
     getStatusColor,
@@ -292,6 +308,7 @@ export const useOrder = (order: AdminOrder) => {
     canCreateShipment,
     canMarkAsPickedUp,
     canDownloadShippingLabel,
+    canReleaseGoods: canReleaseGoods(order),
     canRecordPayment,
     isNegativeFulfillmentStatus,
     isFulfillmentDialogOpen,

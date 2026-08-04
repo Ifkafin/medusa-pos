@@ -13,6 +13,7 @@ import ConfirmationDialog from "./confirmation-dialog";
 import PayLaterConfirmationDialog from "./pay-later-confirmation-dialog";
 import { CreditCard } from "lucide-react";
 import { useTranslation } from "@/i18n";
+import TilltapPayment from "./tilltap-payment";
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -50,6 +51,8 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
     items,
     paymentMethodInfo,
     isCashPayment,
+    isTilltapPayment,
+    tilltapPayment,
     draftOrder,
     billCounts,
   } = usePaymentModal(draftOrderId, onClose, isOpen);
@@ -70,7 +73,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
   return (
     <Dialog open={isOpen} onOpenChange={handleDialogChange}>
       <DialogContent
-        className="max-w-6xl h-[92vh] p-0 flex flex-col overflow-hidden gap-0"
+        className="h-[92vh] w-[calc(100vw-1rem)] max-w-6xl p-0 flex flex-col overflow-hidden gap-0"
         preventOutsideClose={true}
       >
         {/* Simple Header */}
@@ -88,9 +91,9 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
           </div>
         </div>
 
-        <div className="flex-1 flex min-h-0 overflow-hidden">
+        <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
           {/* Left: Items Summary */}
-          <div className="w-80 bg-surface-muted border-r border-theme-border overflow-y-auto">
+          <div className="w-full md:w-80 max-h-48 md:max-h-none bg-surface-muted border-b md:border-b-0 md:border-r border-theme-border overflow-y-auto shrink-0">
             <div className="p-4">
               <div className="text-xs font-semibold text-fg-subtle uppercase tracking-wider mb-3">
                 {t("checkout.order_summary_label")}
@@ -126,8 +129,18 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
           </div>
 
           {/* Right: Payment Interface */}
-          <div className="flex-1 flex flex-col">
-            {isCashPayment ? (
+          <div className="flex-1 min-w-0 flex flex-col">
+            {isTilltapPayment ? (
+              <TilltapPayment
+                amount={total}
+                currency={currency}
+                isLoading={isLoading}
+                isProcessing={isProcessing}
+                state={tilltapPayment}
+                onStart={handleCompleteClick}
+                onClose={handleClose}
+              />
+            ) : isCashPayment ? (
               <div className="flex-1 min-h-0 p-8 pb-6">
                 <div className="h-full flex flex-col min-h-0">
                   {/* Scrolls on short screens; the actions below stay pinned and visible. */}

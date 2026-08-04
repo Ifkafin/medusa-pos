@@ -140,6 +140,10 @@ interface DraftOrderMetadata extends Record<string, unknown> {
   pay_later?: boolean;
   /** ISO date the goods were actually delivered offline (created_at is not backdatable). */
   delivered_offline_on?: string;
+  /** Local recovery marker for one converted order with an unresolved async payment. */
+  async_payment_order_id?: string;
+  async_payment_session_id?: string;
+  async_payment_provider_id?: string;
 }
 
 type AddItemResult = {

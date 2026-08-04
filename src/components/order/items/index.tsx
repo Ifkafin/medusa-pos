@@ -9,12 +9,14 @@ import { useTranslation } from "@/i18n";
 interface ItemsProps {
   order: AdminOrder;
   isNegativeFulfillmentStatus: boolean;
+  canReleaseGoods: boolean;
   onOpenFulfillmentDialog: () => void;
 }
 
 const Items: React.FC<ItemsProps> = ({
   order,
   isNegativeFulfillmentStatus,
+  canReleaseGoods,
   onOpenFulfillmentDialog,
 }) => {
   const { t } = useTranslation();
@@ -24,7 +26,7 @@ const Items: React.FC<ItemsProps> = ({
 
   const contactEmail = getOrderContactEmail(order);
   const showFulfillButton =
-    isNegativeFulfillmentStatus && !!contactEmail;
+    isNegativeFulfillmentStatus && canReleaseGoods && !!contactEmail;
 
   return (
     <div className="rounded-lg border border-theme-border overflow-hidden shadow-sm bg-surface flex flex-col h-full">

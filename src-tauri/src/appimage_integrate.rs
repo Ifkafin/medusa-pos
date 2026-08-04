@@ -1,11 +1,11 @@
-//! Self-installs the Medusa POS AppImage into the user's applications menu
+//! Self-installs the Tilltap POS AppImage into the user's applications menu
 //! on first run.
 //!
 //! Only does anything when the binary is launched as an AppImage (i.e. the
 //! `$APPIMAGE` env var is set by the AppImage runtime). On non-AppImage Linux
 //! builds, dev builds, and other platforms, all functions are no-ops.
 //!
-//! State is tracked in `~/.config/medusapos/integration.json` with an
+//! State is tracked in `~/.config/tilltappos/integration.json` with an
 //! explicit schema version and an authoritative list of files we created.
 //! We only ever manage files in that list; anything else in the install
 //! directory is left alone. See the handover doc's "Forward compatibility"
@@ -29,11 +29,11 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 // WM_CLASS must match what the running window reports — verify with
 // `xprop WM_CLASS` once the dev build is running, and update if needed.
 // =========================================================================
-const APP_NAME: &str = "Medusa POS"; // human-readable (dialogs, menu)
-const APP_EXEC_NAME: &str = "MedusaPOS"; // PascalCase, no spaces; AppImage filename
-const APP_SLUG: &str = "medusapos"; // lowercase; used in paths, icon name
-const APP_ID: &str = "ge.nari.medusa-pos"; // reverse-DNS, matches tauri.conf.json
-const WM_CLASS: &str = "Medusa-pos"; // verified via `xprop WM_CLASS` (res_class derived from APP_ID)
+const APP_NAME: &str = "Tilltap POS"; // human-readable (dialogs, menu)
+const APP_EXEC_NAME: &str = "TilltapPOS"; // PascalCase, no spaces; AppImage filename
+const APP_SLUG: &str = "tilltappos"; // lowercase; used in paths, icon name
+const APP_ID: &str = "com.tilltap.pos"; // reverse-DNS, matches tauri.conf.json
+const WM_CLASS: &str = "Tilltap-pos"; // verify with `xprop WM_CLASS` for release builds
 
 /// Bump when the integration's on-disk layout or state file shape changes.
 /// Add a migration arm in `migrate()` for each step.

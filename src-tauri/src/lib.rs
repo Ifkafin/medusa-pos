@@ -332,7 +332,7 @@ fn print_test_page<T: Driver>(
     map_printer_error(printer.bold(false))?;
     map_printer_error(printer.underline(UnderlineMode::None))?;
 
-    map_printer_error(printer.writeln("Medusa POS"))?;
+    map_printer_error(printer.writeln("Tilltap POS"))?;
     if let Some(v) = app_version.filter(|s| !s.is_empty()) {
         map_printer_error(printer.writeln(&format!("Version {}", v)))?;
     }
@@ -876,7 +876,6 @@ pub fn run() {
                 .level(log_level)
                 .level_for("reqwest", log::LevelFilter::Warn)
                 .level_for("rustls_platform_verifier", log::LevelFilter::Warn)
-                .level_for("tauri_plugin_updater", log::LevelFilter::Info)
                 .build(),
         )
         .plugin(tauri_plugin_http::init())
@@ -884,8 +883,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             check_physical_keyboard,
             toggle_virtual_keyboard,

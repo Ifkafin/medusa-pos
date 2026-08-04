@@ -48,6 +48,7 @@ const Order: React.FC<Props> = ({ order }) => {
     canCreateShipment,
     canMarkAsPickedUp,
     canDownloadShippingLabel,
+    canReleaseGoods,
     canRecordPayment,
     isNegativeFulfillmentStatus,
     isFulfillmentDialogOpen,
@@ -196,6 +197,7 @@ const Order: React.FC<Props> = ({ order }) => {
             <Items
               order={order}
               isNegativeFulfillmentStatus={isNegativeFulfillmentStatus}
+              canReleaseGoods={canReleaseGoods}
               onOpenFulfillmentDialog={() => setIsFulfillmentDialogOpen(true)}
             />
           </div>

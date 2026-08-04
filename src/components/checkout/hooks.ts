@@ -17,6 +17,7 @@ import storage from "@/utils/storage";
 import { usePrinterService } from "@/hooks/printer/usePrinterService";
 import Payments from "@/assets/icons/payments";
 import CardIcon from "@/assets/icons/card";
+import { TILLTAP_PROVIDER_ID } from "@/utils/pos/payment/strategies";
 
 import {
   CartItem,
@@ -196,6 +197,16 @@ const useProvideCheckout = (): CheckoutContextValue => {
 
   const handleOpenModal = useCallback(async () => {
     try {
+      // A converted async order owns this cart until Medusa settles it or staff
+      // recover it from Orders. Reopen that attempt instead of creating another.
+      if (
+        metadata.async_payment_order_id &&
+        metadata.async_payment_provider_id === TILLTAP_PROVIDER_ID
+      ) {
+        setIsPaymentModalOpen(true);
+        return;
+      }
+
       if (registerEnabled && !registerOpen) {
         handleErrorToast(t("checkout.register_closed"));
         return;

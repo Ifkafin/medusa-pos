@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Medusa POS",
+  "productName": "Tilltap POS",
   "version": "../package.json",
-  "identifier": "ge.nari.medusa-pos",
+  "identifier": "com.tilltap.pos",
   "build": {
     "beforeDevCommand": "yarn dev",
     "devUrl": "http://localhost:3000",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Medusa POS",
+        "title": "Tilltap POS",
         "width": 1920,
         "height": 1080,
         "fullscreen": true,
@@ -32,22 +32,14 @@
     },
     "withGlobalTauri": true
   },
-  "plugins": {
-    "updater": {
-      "endpoints": [
-        "https://github.com/narisolutions/medusa-pos/releases/latest/download/latest.json"
-      ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQzMUNERjIyQjM3OUMyOTkKUldTWndubXpJdDhjMC9nTkMwbGJ4cHZNNXR2S05qcnBpd1liaytjSEVkUGVZV09Zek0zWnVGSUgK"
-    }
-  },
   "bundle": {
     "active": true,
     "resources": {
       "icons/icon.png": "icons/512x512.png"
     },
-    "publisher": "Nari Solutions",
-    "copyright": "Copyright 2026 Nari Solutions",
-    "createUpdaterArtifacts": true,
+    "publisher": "Tilltap",
+    "copyright": "Copyright 2026 Tilltap; portions Copyright Nari Solutions and contributors",
+    "createUpdaterArtifacts": false,
     "targets": ["appimage", "dmg", "msi"],
     "icon": [
       "icons/32x32.png",
