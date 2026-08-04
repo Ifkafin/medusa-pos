@@ -114,22 +114,33 @@ export function canReleaseGoods(
     "payment_status" | "payment_collections" | "metadata"
   >
 ): boolean {
-  return !isTilltapOrder(order) || canFinalizeOrder(order);
+  return !isTilltapOrder(order);
 }
 
 export async function requireAuthoritativeGoodsRelease(
-  order: Pick<
-    AdminOrder,
-    "id" | "payment_status" | "payment_collections" | "metadata"
-  >,
   refreshOrder: () => Promise<AdminOrder>
 ): Promise<void> {
-  if (!isTilltapOrder(order)) return;
-
   const refreshedOrder = await refreshOrder();
-  if (!canFinalizeOrder(refreshedOrder)) {
+  if (isTilltapOrder(refreshedOrder)) {
     throw new Error(
-      "Tilltap payment must be captured in Medusa before goods can be released"
+      "Automatic goods release is disabled for Tilltap pilot orders pending signed reconciliation"
+    );
+  }
+}
+
+export function canIssueReceipt(
+  order: Pick<AdminOrder, "payment_collections" | "metadata">
+): boolean {
+  return !isTilltapOrder(order);
+}
+
+export async function requireAuthoritativeReceipt(
+  refreshOrder: () => Promise<AdminOrder>
+): Promise<void> {
+  const refreshedOrder = await refreshOrder();
+  if (!canIssueReceipt(refreshedOrder)) {
+    throw new Error(
+      "Paid receipts are disabled for Tilltap pilot orders pending signed reconciliation"
     );
   }
 }
@@ -155,7 +166,7 @@ export async function finalizeOrderIfPaid(
   order: AdminOrder,
   finalize: (paidOrder: AdminOrder) => Promise<void>
 ): Promise<boolean> {
-  if (!canFinalizeOrder(order)) return false;
+  if (!canFinalizeOrder(order) || isTilltapOrder(order)) return false;
   await finalize(order);
   return true;
 }

@@ -62,7 +62,7 @@ const TilltapPayment = ({
       errorCorrectionLevel: "M",
       margin: 2,
       width: 280,
-      color: { dark: "#09090b", light: "#ffffff" },
+      color: { dark: "#000000", light: "#ffffff" },
     })
       .then((url) => {
         if (!cancelled) {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AdminOrder } from "@medusajs/types";
 import {
   TILLTAP_PROVIDER_ID,
+  canIssueReceipt,
   canRecordPayment,
   canReleaseGoods,
   finalizeOrderIfPaid,
@@ -10,6 +11,7 @@ import {
   hasTilltapPaymentSession,
   processPaymentWithStrategy,
   requireAuthoritativeGoodsRelease,
+  requireAuthoritativeReceipt,
   type PaymentProcessingDependencies,
 } from "./strategies";
 
@@ -196,6 +198,14 @@ describe("Tilltap order safety predicates", () => {
     );
   });
 
+  it("does not automatically finalize a captured Tilltap order", async () => {
+    const finalize = vi.fn();
+    expect(
+      await finalizeOrderIfPaid(tilltapOrder("captured"), finalize)
+    ).toBe(false);
+    expect(finalize).not.toHaveBeenCalled();
+  });
+
   it("blocks Record Payment for every method once a Tilltap session exists", () => {
     expect(canRecordPayment(tilltapOrder())).toBe(false);
     expect(
@@ -203,34 +213,42 @@ describe("Tilltap order safety predicates", () => {
     ).toBe(true);
   });
 
-  it("allows non-Tilltap pay-later release but requires captured for Tilltap", () => {
+  it("allows non-Tilltap pay-later release but never auto-releases Tilltap", () => {
     expect(canReleaseGoods({ ...order("awaiting"), metadata: {} })).toBe(true);
     expect(canReleaseGoods(tilltapOrder("authorized"))).toBe(false);
-    expect(canReleaseGoods(tilltapOrder("captured"))).toBe(true);
+    expect(canReleaseGoods(tilltapOrder("captured"))).toBe(false);
   });
 
-  it("re-reads a Tilltap order and accepts only fresh captured status", async () => {
-    const refreshAuthorized = vi.fn().mockResolvedValue(tilltapOrder("authorized"));
-    await expect(
-      requireAuthoritativeGoodsRelease(tilltapOrder("captured"), refreshAuthorized)
-    ).rejects.toThrow("must be captured");
-    expect(refreshAuthorized).toHaveBeenCalledTimes(1);
+  it("always re-reads and rejects a captured Tilltap order from a stale non-Tilltap snapshot", async () => {
+    const staleOrder = { ...order("captured"), metadata: {} } as AdminOrder;
+    expect(canReleaseGoods(staleOrder)).toBe(true);
 
     const refreshCaptured = vi.fn().mockResolvedValue(tilltapOrder("captured"));
     await expect(
-      requireAuthoritativeGoodsRelease(tilltapOrder("authorized"), refreshCaptured)
-    ).resolves.toBeUndefined();
+      requireAuthoritativeGoodsRelease(refreshCaptured)
+    ).rejects.toThrow("Automatic goods release is disabled");
     expect(refreshCaptured).toHaveBeenCalledTimes(1);
   });
 
-  it("does not add an authoritative payment dependency to non-Tilltap pay-later", async () => {
-    const refresh = vi.fn();
+  it("re-reads but otherwise leaves non-Tilltap pay-later release unchanged", async () => {
+    const refresh = vi.fn().mockResolvedValue({
+      ...order("awaiting"),
+      metadata: {},
+    });
     await expect(
-      requireAuthoritativeGoodsRelease(
-        { ...order("awaiting"), metadata: {} },
-        refresh
-      )
+      requireAuthoritativeGoodsRelease(refresh)
     ).resolves.toBeUndefined();
-    expect(refresh).not.toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides receipts and re-checks before rejecting a stale receipt handler", async () => {
+    expect(canIssueReceipt(tilltapOrder("captured"))).toBe(false);
+    expect(canIssueReceipt({ ...order("captured"), metadata: {} })).toBe(true);
+
+    const refresh = vi.fn().mockResolvedValue(tilltapOrder("captured"));
+    await expect(requireAuthoritativeReceipt(refresh)).rejects.toThrow(
+      "Paid receipts are disabled"
+    );
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

@@ -41,7 +41,8 @@ If your backend is older/newer, behavior can differ (especially pricing and inve
 - The checkout URL must be `/checkout/{token}` and the status URL must be `/api/checkouts/{same-token}/status` on the trusted origin. The current token is a 43-character base64url capability.
 - Status responses must match `checkout_id`, expiry, and simulation mode. Only real `PAID` with a nonempty receipt triggers Medusa payment-session reauthorization.
 - Before provider initialization, the POS writes an attempt marker to Medusa order metadata. The payment session attached to the server-side payment collection is the authoritative recovery journal; local cart metadata is only a shortcut.
-- Tilltap status and Medusa authorization never authorize fulfillment directly. The POS captures the Medusa payment separately and releases goods or paid-order side effects only after a fresh Medusa read reports `captured`.
+- Tilltap status, Medusa authorization, and Medusa capture are reconciliation evidence only in this fixture/sandbox pilot. Automatic fulfillment, completion, paid receipts, drawer actions, success UX, and cart cleanup remain disabled because signed outbox evidence and merchant re-verification are not implemented.
+- Same-terminal recovery can use the local order pointer, but the server-side order marker and payment session remain the journal. Cross-terminal server-journal recovery UI is not implemented and is a blocker for leaving the pilot; do not add a local-cart overwrite recovery shortcut.
 
 ## Quick Start
 

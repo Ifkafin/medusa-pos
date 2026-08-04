@@ -108,7 +108,7 @@ export const useFulfillmentDialog = (
 
     try {
       const sdk = getSdk();
-      await requireAuthoritativeGoodsRelease(order, async () => {
+      await requireAuthoritativeGoodsRelease(async () => {
         const { order: refreshedOrder } = await sdk.admin.order.retrieve(
           order.id,
           { fields: GOODS_RELEASE_FIELDS }

@@ -20,11 +20,13 @@ import { usePrinterService } from "@/hooks/printer/usePrinterService";
 import { classifyFulfillment, classifyOrderShippingMethod } from "@/utils/pos/fulfillment";
 import {
   canRecordPayment as canRecordPaymentForOrder,
+  canIssueReceipt,
   canReleaseGoods,
   requireAuthoritativeGoodsRelease,
+  requireAuthoritativeReceipt,
 } from "@/utils/pos/payment/strategies";
 
-const GOODS_RELEASE_FIELDS =
+const TILLTAP_GATING_FIELDS =
   "id,payment_status,metadata,*payment_collections.payment_sessions";
 
 // Type for fulfillment with extended properties
@@ -90,9 +92,21 @@ export const useOrder = (order: AdminOrder) => {
     if (isPrinting) return;
     setIsPrinting(true);
     try {
+      const sdk = getSdk();
+      await requireAuthoritativeReceipt(async () => {
+        const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+          order.id,
+          { fields: TILLTAP_GATING_FIELDS }
+        );
+        return refreshedOrder;
+      });
       await printOrderReceipt(order);
       toast.success(t("orders.receipt_sent_to_printer"));
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Tilltap pilot")) {
+        handleErrorToast(error.message);
+        return;
+      }
       const printer = getDefaultPrinter();
       if (printer) {
         toast.error(t("orders.receipt_did_not_print"), {
@@ -113,9 +127,21 @@ export const useOrder = (order: AdminOrder) => {
 
     setIsDownloadingPDF(true);
     try {
+      const sdk = getSdk();
+      await requireAuthoritativeReceipt(async () => {
+        const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+          order.id,
+          { fields: TILLTAP_GATING_FIELDS }
+        );
+        return refreshedOrder;
+      });
       await downloadReceiptAsPDF(order);
-    } catch {
-      handleErrorToast(t("orders.failed_to_download_receipt"));
+    } catch (error) {
+      handleErrorToast(
+        error instanceof Error
+          ? error.message
+          : t("orders.failed_to_download_receipt")
+      );
     } finally {
       setIsDownloadingPDF(false);
     }
@@ -194,10 +220,10 @@ export const useOrder = (order: AdminOrder) => {
     setIsCreatingShipment(true);
     try {
       const sdk = getSdk();
-      await requireAuthoritativeGoodsRelease(order, async () => {
+      await requireAuthoritativeGoodsRelease(async () => {
         const { order: refreshedOrder } = await sdk.admin.order.retrieve(
           order.id,
-          { fields: GOODS_RELEASE_FIELDS }
+          { fields: TILLTAP_GATING_FIELDS }
         );
         return refreshedOrder;
       });
@@ -242,10 +268,10 @@ export const useOrder = (order: AdminOrder) => {
     setIsPickupConfirmationOpen(false);
     try {
       const sdk = getSdk();
-      await requireAuthoritativeGoodsRelease(order, async () => {
+      await requireAuthoritativeGoodsRelease(async () => {
         const { order: refreshedOrder } = await sdk.admin.order.retrieve(
           order.id,
-          { fields: GOODS_RELEASE_FIELDS }
+          { fields: TILLTAP_GATING_FIELDS }
         );
         return refreshedOrder;
       });
@@ -308,6 +334,7 @@ export const useOrder = (order: AdminOrder) => {
     canCreateShipment,
     canMarkAsPickedUp,
     canDownloadShippingLabel,
+    canIssueReceipt: canIssueReceipt(order),
     canReleaseGoods: canReleaseGoods(order),
     canRecordPayment,
     isNegativeFulfillmentStatus,

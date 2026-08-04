@@ -452,6 +452,16 @@ const usePaymentModal = (
         return null;
       }
       const expiresAtIso = new Date(presentation.expiresAt).toISOString();
+      const leaveCapturedForReview = (capturedOrder: AdminOrder): null => {
+        setTilltapPayment({
+          phase: "review",
+          checkoutUrl: presentation.checkoutUrl,
+          expiresAt: expiresAtIso,
+          orderDisplayId: capturedOrder.display_id,
+          providerConfirmed: true,
+        });
+        return null;
+      };
 
       setFrozenTotal(initialOrder.total || session.amount);
       setTilltapPayment({
@@ -473,7 +483,9 @@ const usePaymentModal = (
             initialOrder.id,
             { fields: PAYMENT_ORDER_FIELDS }
           );
-          if (canFinalizeOrder(medusaOrder)) return medusaOrder;
+          if (canFinalizeOrder(medusaOrder)) {
+            return leaveCapturedForReview(medusaOrder);
+          }
 
           const reachedLocalExpiry = Date.now() >= presentation.expiresAt;
           const capabilityStatus = await fetchTilltapCapabilityStatus(
@@ -499,7 +511,7 @@ const usePaymentModal = (
                   { fields: PAYMENT_ORDER_FIELDS }
                 );
               if (canFinalizeOrder(authorization.order)) {
-                return authorization.order;
+                return leaveCapturedForReview(authorization.order);
               }
               if (authorization.is_authorized) {
                 const paymentId = findUncapturedTilltapPaymentId(
@@ -523,7 +535,9 @@ const usePaymentModal = (
             initialOrder.id,
             { fields: PAYMENT_ORDER_FIELDS }
           );
-          if (canFinalizeOrder(refreshedOrder)) return refreshedOrder;
+          if (canFinalizeOrder(refreshedOrder)) {
+            return leaveCapturedForReview(refreshedOrder);
+          }
 
           if (reachedLocalExpiry) {
             setTilltapPayment({
@@ -566,7 +580,9 @@ const usePaymentModal = (
             initialOrder.id,
             { fields: PAYMENT_ORDER_FIELDS }
           );
-          if (canFinalizeOrder(refreshedOrder)) return refreshedOrder;
+          if (canFinalizeOrder(refreshedOrder)) {
+            return leaveCapturedForReview(refreshedOrder);
+          }
         } catch {
           // The outcome remains unresolved and must be reviewed.
         }
@@ -785,18 +801,22 @@ const usePaymentModal = (
           }
         }
 
-        // Every fulfillment, completion, receipt, success sound, drawer action,
-        // and cart cleanup is inside this Medusa-authoritative payment gate.
+        // Tilltap capture is reconciliation evidence only in this pilot. Without
+        // a signed outbox and merchant re-verification, never enter automatic
+        // fulfillment, completion, receipt, hardware, success, or cleanup paths.
+        if (selectedStrategy === "asynchronous") {
+          setTilltapPayment({
+            phase: "review",
+            orderDisplayId: finalOrder.display_id,
+            providerConfirmed: canFinalizeOrder(finalOrder),
+          });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+          return null;
+        }
+
         if (
           !(await finalizePaidOrder(finalOrder, selectedPaymentMethod))
         ) {
-          if (selectedStrategy === "asynchronous") {
-            setTilltapPayment({
-              phase: "review",
-              orderDisplayId: finalOrder.display_id,
-            });
-            return null;
-          }
           throw new Error("Medusa has not captured the payment");
         }
         return finalOrder;
@@ -860,7 +880,6 @@ const usePaymentModal = (
     }
 
     let cancelled = false;
-    let finalizingPaidOrder = false;
     submissionRef.current = true;
     setIsProcessing(true);
 
@@ -875,36 +894,27 @@ const usePaymentModal = (
           if (cancelled) return;
 
           setFrozenTotal(order.total || 0);
-          let settledOrder: AdminOrder | null = canFinalizeOrder(order)
-            ? order
-            : null;
-
-          if (!settledOrder) {
-            const session = findTilltapPaymentSession(
-              order,
-              pendingAsyncSessionId
-            );
-            if (!session) {
-              setTilltapPayment({
-                phase: "review",
-                orderDisplayId: order.display_id,
-              });
-              return;
-            }
-            settledOrder = await monitorTilltapPayment(order, session);
+          if (canFinalizeOrder(order)) {
+            setTilltapPayment({
+              phase: "review",
+              orderDisplayId: order.display_id,
+              providerConfirmed: true,
+            });
+            return;
           }
 
-          if (settledOrder) {
-            finalizingPaidOrder = true;
-            if (
-              await finalizePaidOrder(
-                settledOrder,
-                pendingAsyncProviderId
-              )
-            ) {
-              onClose?.();
-            }
+          const session = findTilltapPaymentSession(
+            order,
+            pendingAsyncSessionId
+          );
+          if (!session) {
+            setTilltapPayment({
+              phase: "review",
+              orderDisplayId: order.display_id,
+            });
+            return;
           }
+          await monitorTilltapPayment(order, session);
         } catch {
           if (!cancelled) {
             setTilltapPayment({ phase: "review" });
@@ -917,11 +927,9 @@ const usePaymentModal = (
     });
 
     return () => {
-      if (!finalizingPaidOrder) {
-        cancelled = true;
-        tilltapPollAbortRef.current?.abort();
-        submissionRef.current = false;
-      }
+      cancelled = true;
+      tilltapPollAbortRef.current?.abort();
+      submissionRef.current = false;
     };
   }, [
     isOpen,
@@ -930,8 +938,6 @@ const usePaymentModal = (
     pendingAsyncSessionId,
     pendingAsyncProviderId,
     monitorTilltapPayment,
-    finalizePaidOrder,
-    onClose,
   ]);
 
   // Pay later: fulfill but skip capture — the uncaptured order IS the "outstanding" signal,
