@@ -48,10 +48,12 @@ if (missingCommands.length > 0) {
 console.log(`Fedora build configuration is valid for ${backendUrl.origin}.`);
 if (process.argv.includes("--check")) process.exit(0);
 
-const npmExecPath = process.env.npm_execpath;
-const command = npmExecPath ? process.execPath : "pnpm";
-const commandArgs = [...(npmExecPath ? [npmExecPath] : []), "exec", "tauri", "build", "--bundles", "rpm", "--ci"];
-const child = spawn(command, commandArgs, { cwd: repository, env: process.env, stdio: "inherit" });
+const tauri = join(repository, "node_modules", ".bin", "tauri");
+const child = spawn(tauri, ["build", "--bundles", "rpm", "--ci"], {
+  cwd: repository,
+  env: process.env,
+  stdio: "inherit",
+});
 child.on("error", (error) => {
   console.error(error);
   process.exitCode = 1;
