@@ -3,14 +3,12 @@ import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { useEffect, useState } from "react";
 import { useHeader } from "./hooks";
 import { useQueryStore } from "@/hooks/queries/useQueryStore";
-import { getBrandName, getLogoUrl } from "@/utils/settings/store/metadata";
-import { useTranslation } from "@/i18n";
+import { getLogoUrl } from "@/utils/settings/store/metadata";
 
 const Header: React.FC = () => {
   const [now, setNow] = useState(new Date());
   const sidebar = useSidebar();
   const { data: store } = useQueryStore();
-  const { t } = useTranslation();
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -29,22 +27,18 @@ const Header: React.FC = () => {
       <div className="flex items-center gap-4">
         {!sidebar.open && <SidebarTrigger />}
       </div>
-      <div>
-        {logoSrc ? (
+      {logoSrc && (
+        <div>
           <img
             src={logoSrc}
             className="h-8 drop-shadow-lg"
-            alt={getBrandName(store)}
+            alt=""
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = "none";
             }}
           />
-        ) : (
-          <span className="text-lg font-semibold text-foreground">
-            {getBrandName(store) || t("common.pos")}
-          </span>
-        )}
-      </div>
+        </div>
+      )}
       <div className="flex gap-1.5 items-center text-fg-muted">
         <span>{formatDate(now)}</span>
         <Calendar />
