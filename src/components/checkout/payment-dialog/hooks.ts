@@ -26,7 +26,6 @@ import {
 import {
   canFinalizeOrder,
   findTilltapPaymentSession,
-  findUncapturedTilltapPaymentId,
   finalizeOrderIfPaid,
   getPaymentStrategy,
   TILLTAP_PROVIDER_ID,
@@ -503,30 +502,8 @@ const usePaymentModal = (
               providerConfirmed: true,
             });
 
-            try {
-              const authorization =
-                await sdk.admin.order.authorizePaymentSession(
-                  initialOrder.id,
-                  session.id,
-                  { fields: PAYMENT_ORDER_FIELDS }
-                );
-              if (canFinalizeOrder(authorization.order)) {
-                return leaveCapturedForReview(authorization.order);
-              }
-              if (authorization.is_authorized) {
-                const paymentId = findUncapturedTilltapPaymentId(
-                  authorization.order,
-                  session.id
-                );
-                if (paymentId) {
-                  await sdk.admin.payment.capture(paymentId, {});
-                }
-              }
-            } catch {
-              void logger.warn(
-                "Tilltap was confirmed but Medusa authorization or capture is still unavailable"
-              );
-            }
+            // Medusa's worker is the sole authorizer. The POS only observes the
+            // order so it cannot race the reconciliation workflow.
           }
 
           // Re-read after the provider capability and any authorization/capture
@@ -1076,6 +1053,30 @@ const usePaymentModal = (
       });
     }
   }, [isTilltapPayment, isCashType, handleProcessPayment, handleClose]);
+
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !isTilltapPayment ||
+      tilltapPayment ||
+      !draftOrder ||
+      submissionRef.current ||
+      pendingAsyncOrderId
+    ) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      if (!submissionRef.current) void handleProcessPayment();
+    });
+  }, [
+    isOpen,
+    isTilltapPayment,
+    tilltapPayment,
+    draftOrder,
+    pendingAsyncOrderId,
+    handleProcessPayment,
+  ]);
 
   // Handle complete payment with modal close (legacy, kept for backwards compatibility)
   const handleCompletePayment = useCallback(async (): Promise<void> => {
