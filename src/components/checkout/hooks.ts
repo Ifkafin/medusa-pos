@@ -73,6 +73,7 @@ type CheckoutContextValue = {
   setOrderDiscount: (discount: OrderDiscount | null) => void;
   paymentMethods: PaymentMethodOption[];
   selectedPaymentMethod: PaymentMethod;
+  hasPendingAsyncPayment: boolean;
   setPaymentMethod: (method: PaymentMethod) => void;
   handleOpenDrawer: () => Promise<void>;
   setItemMetadata: (
@@ -297,12 +298,16 @@ const useProvideCheckout = (): CheckoutContextValue => {
   }, []);
 
   const handleClearItems = useCallback(async () => {
+    if (metadata.async_payment_order_id) {
+      handleErrorToast("This cart has an unresolved Tilltap payment. Reopen Payment to check the existing order.");
+      return;
+    }
     clearItems();
 
     if (draftOrderId) {
       await deleteDraftOrder();
     }
-  }, [clearItems, deleteDraftOrder, draftOrderId]);
+  }, [clearItems, deleteDraftOrder, draftOrderId, metadata.async_payment_order_id]);
 
   const getTotal = useCallback(() => getTotalPrice(), [getTotalPrice]);
 
@@ -400,6 +405,7 @@ const useProvideCheckout = (): CheckoutContextValue => {
       setOrderDiscount,
       paymentMethods: paymentMethodOptions,
       selectedPaymentMethod: metadata.payment_method as PaymentMethod,
+      hasPendingAsyncPayment: Boolean(metadata.async_payment_order_id),
       setPaymentMethod,
       handleOpenDrawer,
       setItemMetadata,

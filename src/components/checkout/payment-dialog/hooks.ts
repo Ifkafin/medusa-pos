@@ -336,7 +336,9 @@ const usePaymentModal = (
   // While processing, the draft order is cleared (so its total reads 0). Show the
   // frozen snapshot taken at submit time so the amount never flashes to 0.00.
   const displayTotal =
-    isProcessing && frozenTotal != null ? frozenTotal : calculations.total;
+    (isProcessing || tilltapPayment) && frozenTotal != null
+      ? frozenTotal
+      : calculations.total;
 
   // Rounded cash amount to collect (cash + rounding on); card shows exact total.
   const cashDue = roundingActive ? roundCashAmount(displayTotal) : displayTotal;
@@ -451,7 +453,13 @@ const usePaymentModal = (
         return null;
       }
       const expiresAtIso = new Date(presentation.expiresAt).toISOString();
+      const releaseResolvedCart = (): void => {
+        clearItems();
+        setPaymentMethod(undefined);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+      };
       const leaveCapturedForReview = (capturedOrder: AdminOrder): null => {
+        releaseResolvedCart();
         setTilltapPayment({
           phase: "review",
           checkoutUrl: presentation.checkoutUrl,
@@ -517,6 +525,9 @@ const usePaymentModal = (
           }
 
           if (reachedLocalExpiry) {
+            if (!providerConfirmed && capabilityStatus !== "review") {
+              releaseResolvedCart();
+            }
             setTilltapPayment({
               phase:
                 providerConfirmed || capabilityStatus === "review"
@@ -531,6 +542,9 @@ const usePaymentModal = (
           }
 
           if (capabilityStatus === "review" || capabilityStatus === "failed") {
+            if (capabilityStatus === "failed" && !providerConfirmed) {
+              releaseResolvedCart();
+            }
             setTilltapPayment({
               phase:
                 capabilityStatus === "review" || providerConfirmed
@@ -581,7 +595,7 @@ const usePaymentModal = (
 
       return null;
     },
-    []
+    [clearItems, setPaymentMethod]
   );
 
   // Main payment processing flow
@@ -872,6 +886,9 @@ const usePaymentModal = (
 
           setFrozenTotal(order.total || 0);
           if (canFinalizeOrder(order)) {
+            clearItems();
+            setPaymentMethod(undefined);
+            void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
             setTilltapPayment({
               phase: "review",
               orderDisplayId: order.display_id,
@@ -915,6 +932,8 @@ const usePaymentModal = (
     pendingAsyncSessionId,
     pendingAsyncProviderId,
     monitorTilltapPayment,
+    clearItems,
+    setPaymentMethod,
   ]);
 
   // Pay later: fulfill but skip capture — the uncaptured order IS the "outstanding" signal,

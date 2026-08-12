@@ -5,7 +5,7 @@
 //! `$APPIMAGE` env var is set by the AppImage runtime). On non-AppImage Linux
 //! builds, dev builds, and other platforms, all functions are no-ops.
 //!
-//! State is tracked in `~/.config/tilltappos/integration.json` with an
+//! State is tracked in `~/.config/medusapos/integration.json` with an
 //! explicit schema version and an authoritative list of files we created.
 //! We only ever manage files in that list; anything else in the install
 //! directory is left alone. See the handover doc's "Forward compatibility"
@@ -30,9 +30,9 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 // `xprop WM_CLASS` once the dev build is running, and update if needed.
 // =========================================================================
 const APP_NAME: &str = "Tilltap POS"; // human-readable (dialogs, menu)
-const APP_EXEC_NAME: &str = "TilltapPOS"; // PascalCase, no spaces; AppImage filename
-const APP_SLUG: &str = "tilltappos"; // lowercase; used in paths, icon name
-const APP_ID: &str = "com.tilltap.pos"; // reverse-DNS, matches tauri.conf.json
+const APP_EXEC_NAME: &str = "TilltapPOSPilot"; // existing executable name; preserves installed integration paths
+const APP_SLUG: &str = "tilltappospilot"; // existing desktop integration path
+const APP_ID: &str = "com.ifkafin.tilltap-pos"; // reverse-DNS, matches tauri.conf.json
 const WM_CLASS: &str = "Tilltap-pos"; // verify with `xprop WM_CLASS` for release builds
 
 /// Bump when the integration's on-disk layout or state file shape changes.

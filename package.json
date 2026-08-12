@@ -1,6 +1,6 @@
 {
-  "name": "tilltap-pos",
-  "version": "0.1.0",
+  "name": "medusa-pos",
+  "version": "0.4.1",
   "private": true,
   "author": "Tilltap",
   "license": "Apache-2.0",

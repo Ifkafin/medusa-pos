@@ -1,6 +1,6 @@
 [package]
-name = "tilltap-pos"
-version = "0.1.0"
+name = "medusa-pos"
+version = "0.4.1"
 description = "Tilltap point of sale application for MedusaJS"
 authors = ["Tilltap"]
 edition = "2021"
@@ -15,7 +15,7 @@ devtools = ["tauri/devtools"]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "tilltap_pos_lib"
+name = "medusa_pos_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
