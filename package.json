@@ -22,6 +22,8 @@
     "tauri:dev": "tauri dev -- --features devtools",
     "tauri:build": "tauri build",
     "tauri:build:debug": "RUST_LOG=debug tauri build --debug",
+    "build:check": "node scripts/build-fedora.mjs --check",
+    "build:fedora": "node scripts/build-fedora.mjs",
     "android:build:apk": "tauri android build --apk",
     "android:build:apk:debug": "tauri android build --apk -d",
     "android:build:apk:split": "tauri android build --apk --split-per-abi",
