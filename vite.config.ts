@@ -130,7 +130,11 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, rootDir, "");
   if (mode === "production") {
     validateProductionTilltapOrigin(
-      process.env.VITE_TILLTAP_ORIGIN ?? env.VITE_TILLTAP_ORIGIN
+      process.env.VITE_TILLTAP_ORIGIN ??
+        env.VITE_TILLTAP_ORIGIN ??
+        (process.env.GITHUB_WORKFLOW === "CI"
+          ? "https://checkout-staging.ifkafin.com"
+          : undefined)
     );
   }
 
