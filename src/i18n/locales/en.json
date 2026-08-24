@@ -1,8 +1,8 @@
 {
   "meta": {
     "locale": "en",
-    "version": "0.0.20",
-    "last_update": "2026-04-23",
+    "version": "0.0.21",
+    "last_update": "2026-08-04",
     "contributors": []
   },
   "common": {
@@ -205,7 +205,34 @@
     "pay_later_confirm_title": "Deliver without payment?",
     "pay_later_confirm_message": "The order will be created and delivered now. Payment stays outstanding and can be recorded later from the order.",
     "register_closed": "Open the register before making a sale.",
-    "rounded_from": "Rounded from"
+    "rounded_from": "Rounded from",
+    "tilltap": {
+      "pilot_title": "Tilltap pilot checkout",
+      "training_notice": "Training-safe workflow. This screen is not proof of a Safaricom transaction. Automatic goods release is disabled even after Medusa capture.",
+      "immutable_amount": "Immutable amount",
+      "preparing": "Preparing one Tilltap payment attempt",
+      "do_not_close": "Do not close the terminal or start another checkout.",
+      "start_notice": "Starting creates one payment attempt. This POS will never retry it.",
+      "start_button": "Start Tilltap pilot checkout",
+      "payment_pending": "Payment pending",
+      "payer_instructions": "Ask the payer to scan or open the link and authorize personally. An M-PESA PIN is still required.",
+      "open_link": "Open checkout link",
+      "expires": "Expires {{expiry}}",
+      "waiting": "Waiting for Tilltap and Medusa. Do not release goods.",
+      "waiting_medusa_title": "Waiting for Medusa capture",
+      "waiting_medusa_message": "Tilltap reports completion, but that is not payment confirmation for this POS. Do not release goods, print a paid receipt, or retry.",
+      "review_title": "Payment needs review",
+      "review_message": "Reconcile this order manually. Automatic goods release and paid receipts are disabled in this pilot, including after capture. Do not retry the attempt.",
+      "recover_order": "Order #{{displayId}} remains in Orders for staff review.",
+      "close_review": "Close for staff review",
+      "failure_title": "Checkout failed or expired",
+      "failure_message": "Do not retry this payment attempt or release goods. The unpaid order remains available for staff recovery.",
+      "expiry": "Expiry: {{expiry}}",
+      "order": "Order #{{displayId}}",
+      "close_recovery": "Close for staff recovery",
+      "qr_alt": "Tilltap pilot checkout QR code",
+      "record_payment_blocked": "Tilltap pilot attempts cannot be retried. Review the original payment session."
+    }
   },
   "orders": {
     "search_placeholder": "Search orders...",

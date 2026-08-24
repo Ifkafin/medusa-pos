@@ -18,6 +18,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/config/query";
 import { usePrinterService } from "@/hooks/printer/usePrinterService";
 import { classifyFulfillment, classifyOrderShippingMethod } from "@/utils/pos/fulfillment";
+import {
+  canRecordPayment as canRecordPaymentForOrder,
+  canIssueReceipt,
+  canReleaseGoods,
+  requireAuthoritativeGoodsRelease,
+  requireAuthoritativeReceipt,
+} from "@/utils/pos/payment/strategies";
+
+const TILLTAP_GATING_FIELDS =
+  "id,payment_status,metadata,*payment_collections.payment_sessions";
 
 // Type for fulfillment with extended properties
 type ExtendedFulfillment = Record<string, unknown> & {
@@ -82,9 +92,21 @@ export const useOrder = (order: AdminOrder) => {
     if (isPrinting) return;
     setIsPrinting(true);
     try {
+      const sdk = getSdk();
+      await requireAuthoritativeReceipt(async () => {
+        const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+          order.id,
+          { fields: TILLTAP_GATING_FIELDS }
+        );
+        return refreshedOrder;
+      });
       await printOrderReceipt(order);
       toast.success(t("orders.receipt_sent_to_printer"));
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Tilltap pilot")) {
+        handleErrorToast(error.message);
+        return;
+      }
       const printer = getDefaultPrinter();
       if (printer) {
         toast.error(t("orders.receipt_did_not_print"), {
@@ -105,9 +127,21 @@ export const useOrder = (order: AdminOrder) => {
 
     setIsDownloadingPDF(true);
     try {
+      const sdk = getSdk();
+      await requireAuthoritativeReceipt(async () => {
+        const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+          order.id,
+          { fields: TILLTAP_GATING_FIELDS }
+        );
+        return refreshedOrder;
+      });
       await downloadReceiptAsPDF(order);
-    } catch {
-      handleErrorToast(t("orders.failed_to_download_receipt"));
+    } catch (error) {
+      handleErrorToast(
+        error instanceof Error
+          ? error.message
+          : t("orders.failed_to_download_receipt")
+      );
     } finally {
       setIsDownloadingPDF(false);
     }
@@ -186,6 +220,13 @@ export const useOrder = (order: AdminOrder) => {
     setIsCreatingShipment(true);
     try {
       const sdk = getSdk();
+      await requireAuthoritativeGoodsRelease(async () => {
+        const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+          order.id,
+          { fields: TILLTAP_GATING_FIELDS }
+        );
+        return refreshedOrder;
+      });
       await sdk.admin.fulfillment.createShipment(fulfillment.id, {
         labels: [
           {
@@ -227,6 +268,13 @@ export const useOrder = (order: AdminOrder) => {
     setIsPickupConfirmationOpen(false);
     try {
       const sdk = getSdk();
+      await requireAuthoritativeGoodsRelease(async () => {
+        const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+          order.id,
+          { fields: TILLTAP_GATING_FIELDS }
+        );
+        return refreshedOrder;
+      });
       await sdk.admin.order.markAsDelivered(order.id, fulfillment.id);
 
       toast.success(t("orders.marked_as_picked_up_success"));
@@ -250,11 +298,13 @@ export const useOrder = (order: AdminOrder) => {
   const isPickupOrder = orderShippingClass.isPickup || !!fulfillmentClass?.isPickup;
 
   const canCreateShipment =
+    canReleaseGoods(order) &&
     fulfillmentStatus === "fulfilled" &&
     !!fulfillmentClass?.isShipping &&
     !!fulfillment?.labels?.[0];
 
   const canMarkAsPickedUp =
+    canReleaseGoods(order) &&
     fulfillmentStatus === "fulfilled" &&
     !!fulfillmentClass?.isPickup;
 
@@ -263,15 +313,7 @@ export const useOrder = (order: AdminOrder) => {
     fulfillmentStatus !== "fulfilled" &&
     fulfillmentStatus !== "delivered";
 
-  // Payment is outstanding and the order is not canceled → allow recording it.
-  const paymentStatus = order.payment_status;
-  const canRecordPayment =
-    order.status !== "canceled" &&
-    (paymentStatus === "not_paid" ||
-      paymentStatus === "awaiting" ||
-      paymentStatus === "requires_action" ||
-      paymentStatus === "partially_authorized" ||
-      paymentStatus === "partially_captured");
+  const canRecordPayment = canRecordPaymentForOrder(order);
 
   return {
     getStatusColor,
@@ -292,6 +334,8 @@ export const useOrder = (order: AdminOrder) => {
     canCreateShipment,
     canMarkAsPickedUp,
     canDownloadShippingLabel,
+    canIssueReceipt: canIssueReceipt(order),
+    canReleaseGoods: canReleaseGoods(order),
     canRecordPayment,
     isNegativeFulfillmentStatus,
     isFulfillmentDialogOpen,

@@ -3,19 +3,20 @@ use std::fs;
 use std::path::Path;
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=TAURI_HTTP_ALLOWLIST");
+
     // Read the TAURI_HTTP_ALLOWLIST environment variable
     // Cargo sets PROFILE to "debug" for dev builds and "release" for production
     let is_dev = env::var("PROFILE").unwrap_or_default() != "release";
 
-    let allowlist = env::var("TAURI_HTTP_ALLOWLIST")
-        .unwrap_or_else(|_| {
-            let mut urls = "https://**".to_string();
-            // Allow localhost in dev builds for local Docker Medusa instances
-            if is_dev {
-                urls.push_str(", http://localhost:*");
-            }
-            urls
-        });
+    let allowlist = env::var("TAURI_HTTP_ALLOWLIST").unwrap_or_else(|_| {
+        let mut urls = "https://**".to_string();
+        // Allow localhost in dev builds for local Docker Medusa instances
+        if is_dev {
+            urls.push_str(", http://localhost:*");
+        }
+        urls
+    });
 
     // Parse the allowlist (comma-separated URLs)
     let urls: Vec<String> = allowlist
@@ -35,12 +36,11 @@ fn generate_capabilities_file(urls: &[String]) {
     let default_file = capabilities_dir.join("default.json");
 
     // Read the existing default.json
-    let existing_content = fs::read_to_string(&default_file)
-        .expect("Failed to read default.json");
+    let existing_content = fs::read_to_string(&default_file).expect("Failed to read default.json");
 
     // Parse JSON
-    let mut json: serde_json::Value = serde_json::from_str(&existing_content)
-        .expect("Failed to parse default.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&existing_content).expect("Failed to parse default.json");
 
     // Get the permissions array
     if let Some(permissions) = json.get_mut("permissions").and_then(|p| p.as_array_mut()) {
@@ -49,7 +49,8 @@ fn generate_capabilities_file(urls: &[String]) {
             if let Some(perm_str) = p.as_str() {
                 perm_str != "http:default"
             } else if let Some(perm_obj) = p.as_object() {
-                perm_obj.get("identifier")
+                perm_obj
+                    .get("identifier")
                     .and_then(|id| id.as_str())
                     .map(|id| id != "http:allow-fetch")
                     .unwrap_or(true)
@@ -58,14 +59,14 @@ fn generate_capabilities_file(urls: &[String]) {
             }
         });
 
-        // Ensure basic HTTP permissions are present
+        // Ensure the streaming commands used by plugin-http are present. The
+        // scoped http:allow-fetch object below grants the fetch command itself.
         let required_perms = vec![
-            "http:allow-fetch",
             "http:allow-fetch-send",
             "http:allow-fetch-read-body",
             "http:allow-fetch-cancel",
         ];
-        
+
         for perm in required_perms {
             if !permissions.iter().any(|p| p.as_str() == Some(perm)) {
                 permissions.push(serde_json::Value::String(perm.to_string()));
@@ -87,18 +88,16 @@ fn generate_capabilities_file(urls: &[String]) {
             "identifier": "http:allow-fetch",
             "allow": url_allow_list
         });
-        
+
         permissions.push(http_permission);
     }
 
     // Serialize the updated JSON
-    let updated_content = serde_json::to_string_pretty(&json)
-        .expect("Failed to serialize JSON");
-    
+    let updated_content = serde_json::to_string_pretty(&json).expect("Failed to serialize JSON");
+
     // Only write if content has changed to avoid infinite rebuild loop
     if updated_content != existing_content {
-        fs::write(&default_file, updated_content)
-            .expect("Failed to write default.json");
-        println!("cargo:warning=Generated capabilities with {} allowed HTTP URLs for production", urls.len());
+        fs::write(&default_file, updated_content).expect("Failed to write default.json");
+        println!("cargo:warning=Generated capabilities with {} allowed HTTP URLs for the current profile", urls.len());
     }
 }

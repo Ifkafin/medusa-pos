@@ -14,11 +14,11 @@ try {
   if (error?.code !== "ENOENT") throw error;
 }
 
-const requiredVariables = ["VITE_BACKEND_URL"];
+const requiredVariables = ["VITE_BACKEND_URL", "VITE_TILLTAP_ORIGIN"];
 const missingVariables = requiredVariables.filter((name) => !process.env[name]?.trim());
 if (missingVariables.length > 0) {
   console.error(`Missing required build variable${missingVariables.length === 1 ? "" : "s"}: ${missingVariables.join(", ")}`);
-  console.error("Copy .env.example to .env and set the deployed Medusa HTTPS origin.");
+  console.error("Copy .env.example to .env and set the deployed Medusa and Tilltap HTTPS origins.");
   process.exit(1);
 }
 
@@ -31,6 +31,25 @@ try {
 }
 if (backendUrl.protocol !== "https:" || backendUrl.username || backendUrl.password) {
   console.error("VITE_BACKEND_URL must be an HTTPS URL without embedded credentials.");
+  process.exit(1);
+}
+
+let tilltapOrigin;
+try {
+  tilltapOrigin = new URL(process.env.VITE_TILLTAP_ORIGIN);
+} catch {
+  console.error("VITE_TILLTAP_ORIGIN must be a valid URL origin.");
+  process.exit(1);
+}
+if (
+  tilltapOrigin.protocol !== "https:" ||
+  tilltapOrigin.username ||
+  tilltapOrigin.password ||
+  (tilltapOrigin.pathname !== "/" && tilltapOrigin.pathname !== "") ||
+  tilltapOrigin.search ||
+  tilltapOrigin.hash
+) {
+  console.error("VITE_TILLTAP_ORIGIN must be an HTTPS origin without credentials, path, query, or fragment.");
   process.exit(1);
 }
 

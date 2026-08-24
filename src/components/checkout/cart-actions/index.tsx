@@ -18,6 +18,7 @@ const CartActions: React.FC = () => {
     paymentMethods,
     setPaymentMethod,
     selectedPaymentMethod,
+    hasPendingAsyncPayment,
   } = useCheckout();
 
   const { customerEmail } = useCheckout();
@@ -106,7 +107,7 @@ const CartActions: React.FC = () => {
           <Button
             variant="outline"
             onClick={() => void handleClearItems()}
-            disabled={loading || items.length === 0}
+            disabled={loading || items.length === 0 || hasPendingAsyncPayment}
             className="w-full min-w-0 h-20 text-base font-semibold"
           >
             <span className="block w-full min-w-0 px-1 leading-tight text-center whitespace-normal wrap-break-word">

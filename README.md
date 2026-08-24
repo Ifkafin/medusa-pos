@@ -1,25 +1,21 @@
 <p align="center">
-  <img src="public/logo.svg" alt="Medusa POS Logo" width="220" />
+  <img src="public/logo.svg" alt="Tilltap POS Logo" width="220" />
 </p>
 
-# Tilltap POS Pilot
+# Tilltap POS
 
-[![CI](https://github.com/narisolutions/medusa-pos/actions/workflows/release.yml/badge.svg)](https://github.com/narisolutions/medusa-pos/actions/workflows/release.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/narisolutions/medusa-pos)](https://github.com/narisolutions/medusa-pos/releases/latest)
-[![License](https://img.shields.io/github/license/narisolutions/medusa-pos)](LICENSE)
+Tilltap's controlled-pilot POS app for Medusa, built with React + Tauri 2.
 
-Ifkafin's controlled Tilltap QR Pay pilot, built as a thin fork of Nari Solutions' Medusa POS.
-
-The original project is available at [narisolutions/medusa-pos](https://github.com/narisolutions/medusa-pos). This fork preserves its Apache-2.0 license and adds an asynchronous `pp_tilltap_default` checkout that renders the provider's QR URL and never falls back to cashier-asserted `markAsPaid` behavior.
-
-> **Sandbox pilot only.** Payment evidence must not release goods. The paired Medusa backend blocks fulfillment and completion for Tilltap orders.
+This is a fork of Medusa POS v0.4.1 by Nari Solutions and contributors. The
+original work and this fork's modifications remain licensed under Apache
+License 2.0; see `LICENSE` and `MODIFICATIONS.md` for attribution and scope.
 
 > This project is under active development. APIs, behavior, and UX may change.
 
-Medusa POS is an independent open-source project and is not officially affiliated with Medusa.
+Tilltap POS is independent and is not officially affiliated with Medusa.
 
 <p align="center">
-  <img src=".github/assets/dark-checkout.png" alt="Medusa POS Checkout" width="900" />
+  <img src=".github/assets/dark-checkout.png" alt="Tilltap POS Checkout" width="900" />
 </p>
 
 ## Compatibility
@@ -33,10 +29,20 @@ Medusa POS is an independent open-source project and is not officially affiliate
 
 ## Medusa Version Tested
 
-- Frontend SDK/types in this project: `@medusajs/js-sdk@2.15.3`, `@medusajs/types@2.15.3`
-- App behavior validated against Medusa Admin API v2.15.x style responses.
+- Frontend SDK/types in this project: `@medusajs/js-sdk@2.18.0`, `@medusajs/types@2.18.0`
+- Tilltap async checkout requires the Medusa 2.18 order payment-session authorization API.
 
 If your backend is older/newer, behavior can differ (especially pricing and inventory fields).
+
+## Tilltap Runtime Contract
+
+- `VITE_TILLTAP_ORIGIN` must be the exact trusted Tilltap origin. Production requires HTTPS; localhost HTTP is accepted for development.
+- `pp_tilltap_default` payment-session data must contain `checkout_url`, `status_url`, integer epoch-millisecond `expires_at`, `checkout_id`, and boolean `simulation`.
+- The checkout URL must be `/checkout/{token}` and the status URL must be `/api/checkouts/{same-token}/status` on the trusted origin. The current token is a 43-character base64url capability.
+- Status responses must match `checkout_id`, expiry, and simulation mode. Only real `PAID` with a nonempty receipt triggers Medusa payment-session reauthorization.
+- Before provider initialization, the POS writes an attempt marker to Medusa order metadata. The payment session attached to the server-side payment collection is the authoritative recovery journal; local cart metadata is only a shortcut.
+- Tilltap status, Medusa authorization, and Medusa capture are reconciliation evidence only in this fixture/sandbox pilot. Automatic fulfillment, completion, paid receipts, drawer actions, success UX, and cart cleanup remain disabled because signed outbox evidence and merchant re-verification are not implemented.
+- Same-terminal recovery can use the local order pointer, but the server-side order marker and payment session remain the journal. Cross-terminal server-journal recovery UI is not implemented and is a blocker for leaving the pilot; do not add a local-cart overwrite recovery shortcut.
 
 ## Quick Start
 
@@ -70,45 +76,13 @@ Tauri storage/config files on first setup, so `yarn dev` is only for limited UI 
 ### Build / Lint
 
 ```bash
-yarn build
+VITE_TILLTAP_ORIGIN=https://pay.example.com yarn build
 yarn lint
 yarn typecheck
 ```
 
-### Fedora RPM
-
-Install Tauri's Fedora dependencies and the RPM packager once:
-
-```bash
-sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file \
-  libappindicator-gtk3-devel librsvg2-devel libxdo-devel rpm-build
-```
-
-Configure the Medusa deployment that the packaged POS should open by default, validate it, and build the RPM:
-
-```bash
-cp .env.example .env
-# Edit .env and set VITE_BACKEND_URL=https://your-medusa-host.example.com/
-pnpm install --frozen-lockfile
-pnpm build:check
-pnpm test
-pnpm typecheck
-pnpm build:fedora
-```
-
-`build:fedora` loads the ignored `.env`, refuses a missing, invalid, non-HTTPS, or credential-bearing backend URL, checks
-for Rust and `rpmbuild`, builds the web application, and produces an RPM under `src-tauri/target/release/bundle/rpm/`.
-Install the resulting package with:
-
-```bash
-sudo dnf install ./src-tauri/target/release/bundle/rpm/*.rpm
-```
-
-For a quick uninstalled run after any successful Tauri release build:
-
-```bash
-./src-tauri/target/release/medusa-pos
-```
+Production builds fail if `VITE_TILLTAP_ORIGIN` is absent, malformed, or not
+HTTPS. Development accepts `http://localhost:<port>` only.
 
 ## Core Features
 
@@ -125,9 +99,20 @@ Use `.env`, `.env.staging`, or `.env.production`:
 
 ```env
 VITE_BACKEND_URL=https://your-medusa-instance.example.com/
+VITE_TILLTAP_ORIGIN=https://pay.example.com
 ```
 
 The backend URL can also be configured at runtime via Store Setup.
+
+### Desktop HTTP Scope
+
+Medusa endpoints are runtime-configurable, so the default release capability
+must allow arbitrary HTTPS origins (`https://**`). This is broader than a fixed
+deployment allowlist and means a compromised renderer could make requests to
+other HTTPS hosts. Release packaging should set `TAURI_HTTP_ALLOWLIST` to the
+known Medusa and Tilltap origins when deployment configuration is fixed. Local
+HTTP is limited to `localhost` in development; `127.0.0.1` and `[::1]` are not
+accepted by the Tilltap origin validator.
 
 ## Medusa API Support Notes
 
@@ -138,44 +123,30 @@ The backend URL can also be configured at runtime via Store Setup.
 
 These are tracked as known limitations for now and can affect POS discount/payment reporting workflows.
 
-## Downloads
+## Distribution
 
-Prebuilt binaries are available on the [Releases](https://github.com/narisolutions/medusa-pos/releases/latest) page for each tagged version.
-
-| Platform | Architecture | Format |
-|---|---|---|
-| Windows | x86_64 | `.msi` installer |
-| macOS | Apple Silicon (aarch64) | `.dmg` disk image |
-| macOS | Intel (x86_64) | `.dmg` disk image |
-| Linux | x86_64 | `.AppImage` |
-
-All builds include signed updater artifacts so the app can auto-update itself after installation.
+The inherited Nari auto-updater is disabled: its endpoint, signing key,
+frontend update check, updater artifacts, permissions, and plugin registration
+are not part of this fork. Pilot builds must be distributed through Tilltap's
+controlled release process.
 
 ### Code signing notice
 
 **Windows** — The MSI installer is **not code-signed** with a trusted certificate. Windows SmartScreen will show an "Unknown Publisher" warning on first install. You can bypass it by clicking *More info* → *Run anyway*.
 
-**macOS** — The DMG is ad-hoc signed but **not notarized** with an Apple Developer ID. macOS Gatekeeper will block it by default. To open it, right-click the app → *Open*, or run `xattr -cr /Applications/Medusa\ POS.app` after dragging it to Applications.
+**macOS** — The DMG is ad-hoc signed but **not notarized** with an Apple Developer ID. macOS Gatekeeper will block it by default. To open it, right-click the app → *Open*, or run `xattr -cr /Applications/Tilltap\ POS.app` after dragging it to Applications.
 
 **Linux** — No code signing is required. The AppImage runs directly after making it executable (`chmod +x`).
 
-## Roadmap
+## Upstream Components
 
-We're actively building out Medusa POS into a full-featured retail system. Here's what's coming:
-
-- **Medusa POS plugin** *(released)* — The custom backend endpoints that power inventory checks, context-aware pricing, and kit support are available as a standalone Medusa plugin: [`@narisolutions/medusa-plugin-pos`](https://github.com/narisolutions/medusa-plugins).
-- **Cash reconciliation (v1)** *(released)* — Open/close register flow that guides staff through end-of-shift cash counting, compares the drawer against expected totals, and records any discrepancies. Optional — enable it in Settings.
-- **Payment provider integrations** — Native support for physical card readers and payment terminals, with real provider IDs recorded against each order for accurate reporting.
-- **Manual card transactions** — Accept card payments through any external terminal and record the method used against the order, no payment provider integration required.
-- **Draft orders & parked sales** — A dedicated Draft Orders tab lets staff park an in-progress sale and pick it up later, with inventory held during the session.
-- **Refunds, exchanges & partial refunds** — Handle the full post-sale lifecycle from the order page: full or partial refunds, product exchanges, and additional charges, all with a complete audit trail.
-- **Quotations** — Create and send formal quotations to customers directly from the POS, useful for large or made-to-order purchases.
-- **Accounting & Z-Reports (v2)** *(coming soon)* — End-of-day Z-Reports across all payment methods, built on top of v1's closed register sessions, with history and PDF/CSV export.
-- **Role management (v2)** *(coming soon)* — Roles defined and enforced by the Medusa backend, replacing v1's interim local manager PIN for sensitive actions.
+The fork retains upstream cash reconciliation and optional integration with the
+[`@narisolutions/medusa-plugin-pos`](https://github.com/narisolutions/medusa-plugins)
+package. Those components remain work of their respective upstream authors.
 
 ## Useful Links
 
-- [Medusa POS Plugin](https://github.com/narisolutions/medusa-plugins) — `@narisolutions/medusa-plugin-pos` on npm
+- [Upstream Medusa POS Plugin](https://github.com/narisolutions/medusa-plugins) — `@narisolutions/medusa-plugin-pos` on npm
 - [Contributing](CONTRIBUTING.md)
 - [Discussions](https://github.com/narisolutions/medusa-pos/discussions)
 - [Issues](https://github.com/narisolutions/medusa-pos/issues)

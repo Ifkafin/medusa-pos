@@ -1,20 +1,11 @@
-# Release workflow — builds Windows MSI, Linux AppImage, and macOS DMG
-# installers, signs updater artifacts, and publishes a GitHub Release.
+# Controlled release workflow — builds Windows MSI, Linux AppImage, and macOS
+# DMG installers and publishes a GitHub Release without updater artifacts.
 #
 # Triggers:
 #   - Push a tag:  git tag v1.0.5 && git push origin v1.0.5
 #   - Manual:      Actions > Release > Run workflow (enter version e.g. "1.0.5")
 #
-# Required secrets (repo Settings > Secrets > Actions):
-#   TAURI_SIGNING_PRIVATE_KEY          — private key for signing updater artifacts
-#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD — password for the key (empty string if none)
-#
-# Generate the keypair with:
-#   npx @tauri-apps/cli signer generate -w ~/.tauri/medusa-pos.key
-#
-# The updater endpoint the app should use (once tauri-plugin-updater is added):
-#   https://github.com/OWNER/REPO/releases/latest/download/latest.json
-#
+# Required repository variable: VITE_TILLTAP_ORIGIN (trusted HTTPS origin).
 
 name: Release
 
@@ -147,27 +138,14 @@ jobs:
       - name: Install frontend dependencies
         run: ${{ steps.pm.outputs.install }}
 
-      # --------------- Signing key guard ---------------
-
-      - name: Validate signing key
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is not set. See workflow comments for setup instructions."
-            exit 1
-          fi
-
       # --------------- Build & Release ---------------
 
       - name: Build Tauri app and publish release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APP_VERSION: ${{ steps.version.outputs.value }}
+          VITE_TILLTAP_ORIGIN: ${{ vars.VITE_TILLTAP_ORIGIN }}
           # Ad-hoc codesign on macOS to ensure _CodeSignature directory is created.
           # Without this, the DMG ships a broken bundle that macOS Gatekeeper rejects.
           # Replace with a real Apple Developer ID identity when available.
@@ -181,6 +159,4 @@ jobs:
             Built from commit ${{ github.sha }}
           releaseDraft: false
           prerelease: ${{ inputs.prerelease || false }}
-          includeUpdaterJson: true
           args: --target ${{ matrix.target }}
-

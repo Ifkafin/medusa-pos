@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Tilltap POS Pilot",
+  "productName": "Tilltap POS",
   "version": "../package.json",
   "identifier": "com.ifkafin.tilltap-pos",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "yarn dev",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "yarn build",
     "frontendDist": "../dist",
     "removeUnusedCommands": false
   },
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Tilltap POS Pilot",
+        "title": "Tilltap POS",
         "width": 1920,
         "height": 1080,
         "fullscreen": true,
@@ -32,21 +32,13 @@
     },
     "withGlobalTauri": true
   },
-  "plugins": {
-    "updater": {
-      "endpoints": [
-        "https://github.com/Ifkafin/medusa-pos/releases/latest/download/latest.json"
-      ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQzMUNERjIyQjM3OUMyOTkKUldTWndubXpJdDhjMC9nTkMwbGJ4cHZNNXR2S05qcnBpd1liaytjSEVkUGVZV09Zek0zWnVGSUgK"
-    }
-  },
   "bundle": {
     "active": true,
     "resources": {
       "icons/icon.png": "icons/512x512.png"
     },
-    "publisher": "Ifkafin",
-    "copyright": "Copyright 2026 Ifkafin; based on Nari Solutions Medusa POS",
+    "publisher": "Tilltap",
+    "copyright": "Copyright 2026 Tilltap; portions Copyright Nari Solutions and contributors",
     "createUpdaterArtifacts": false,
     "targets": ["appimage", "dmg", "msi"],
     "icon": [

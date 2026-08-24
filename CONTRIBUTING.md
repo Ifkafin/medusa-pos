@@ -40,13 +40,16 @@ Thank you for your interest in contributing to Medusa POS! This guide will help 
 
 ### HTTP and storage
 
-- Never use `fetch` directly -- all requests must go through the patched Medusa SDK
+- Never use `fetch` directly for Medusa requests -- they must go through the patched Medusa SDK
+- The only cross-origin exception is polling a provider-issued status capability with Tauri HTTP directly. Validate the capability URL against its trusted origin and attach neither the Medusa JWT nor any merchant secret.
+- Do not extend that exception to ordinary provider APIs, merchant-authenticated requests, or arbitrary URLs.
 - Never call Tauri Store directly -- use the typed wrapper in `src/utils/storage/`
 - Never access `localStorage` directly -- the storage wrapper handles fallback behavior
 
 ### Styling
 
 - Use CSS variables (`primary`, `secondary`) -- never hardcode color values
+- QR modules and their quiet zone may use hardcoded black and white only when required for payment-code scannability; this exception does not apply to surrounding UI
 - Tailwind CSS 4 syntax only
 
 ## Branch Strategy

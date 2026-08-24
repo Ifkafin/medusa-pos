@@ -48,6 +48,8 @@ const Order: React.FC<Props> = ({ order }) => {
     canCreateShipment,
     canMarkAsPickedUp,
     canDownloadShippingLabel,
+    canIssueReceipt,
+    canReleaseGoods,
     canRecordPayment,
     isNegativeFulfillmentStatus,
     isFulfillmentDialogOpen,
@@ -132,28 +134,32 @@ const Order: React.FC<Props> = ({ order }) => {
               {isDownloading ? t("common.downloading") : t("orders.download_shipping_label_button")}
             </Button>
           )}
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="lg"
-              onClick={handleReprintReceipt}
-              disabled={isPrinting || isDownloadingPDF}
-              className={`border-theme-border text-fg-muted hover:text-fg hover:bg-surface-hover ${constants.ORDER_BUTTON_BASE_CLASSES} min-w-[200px]`}
-            >
-              <Printer className="w-5 h-5 mr-3" />
-              {isPrinting ? t("orders.printing") : t("orders.print_receipt_button")}
-            </Button>
-            <Button
-              variant="outline"
-              size="lg"
-              onClick={handleDownloadReceiptPDF}
-              disabled={isDownloadingPDF || isPrinting}
-              className={`border-theme-border text-fg-muted hover:text-fg hover:bg-surface-hover ${constants.ORDER_BUTTON_BASE_CLASSES} min-w-[200px]`}
-            >
-              <FileDown className="w-5 h-5 mr-3" />
-              {isDownloadingPDF ? t("common.downloading") : t("orders.download_pdf_button")}
-            </Button>
-          </div>
+          {canIssueReceipt && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={handleReprintReceipt}
+                disabled={isPrinting || isDownloadingPDF}
+                className={`border-theme-border text-fg-muted hover:text-fg hover:bg-surface-hover ${constants.ORDER_BUTTON_BASE_CLASSES} min-w-[200px]`}
+              >
+                <Printer className="w-5 h-5 mr-3" />
+                {isPrinting ? t("orders.printing") : t("orders.print_receipt_button")}
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={handleDownloadReceiptPDF}
+                disabled={isDownloadingPDF || isPrinting}
+                className={`border-theme-border text-fg-muted hover:text-fg hover:bg-surface-hover ${constants.ORDER_BUTTON_BASE_CLASSES} min-w-[200px]`}
+              >
+                <FileDown className="w-5 h-5 mr-3" />
+                {isDownloadingPDF
+                  ? t("common.downloading")
+                  : t("orders.download_pdf_button")}
+              </Button>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <span
               className={`${getStatusColor(status)} w-3 h-3 rounded-full shrink-0`}
@@ -196,6 +202,7 @@ const Order: React.FC<Props> = ({ order }) => {
             <Items
               order={order}
               isNegativeFulfillmentStatus={isNegativeFulfillmentStatus}
+              canReleaseGoods={canReleaseGoods}
               onOpenFulfillmentDialog={() => setIsFulfillmentDialogOpen(true)}
             />
           </div>

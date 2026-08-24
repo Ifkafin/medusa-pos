@@ -13,10 +13,7 @@ import { useRegister } from "@/context/register";
 import { PaymentMethod } from "@/types/utils";
 import { useCheckout } from "../hooks";
 import { useQueryStore } from "@/hooks/queries/useQueryStore";
-import {
-  useOrderProcessing,
-  type TilltapPaymentPresentation,
-} from "@/hooks/order/useOrderProcessing";
+import { useOrderProcessing } from "@/hooks/order/useOrderProcessing";
 import { getPaymentMethods, getMethodType } from "@/utils/settings/store/metadata";
 import { getCashRounding, roundCashAmount } from "@/utils/settings/preferences";
 import constants from "@/utils/constants";
@@ -26,6 +23,45 @@ import {
   handleErrorToast,
   printerIssueStaffHintToast,
 } from "@/utils/helpers";
+import {
+  canFinalizeOrder,
+  findTilltapPaymentSession,
+  finalizeOrderIfPaid,
+  getPaymentStrategy,
+  TILLTAP_PROVIDER_ID,
+  type PaymentSessionSnapshot,
+} from "@/utils/pos/payment/strategies";
+import {
+  fetchTilltapCapabilityStatus,
+  getTilltapPresentation,
+  validateTilltapAttemptPrerequisites,
+} from "@/utils/pos/payment/tilltap";
+
+const PAYMENT_ORDER_FIELDS =
+  "id,display_id,payment_status,total,currency_code,metadata,*payment_collections,*payment_collections.payments,*payment_collections.payment_sessions,*summary,*fulfillments,*items,*customer,*sales_channel,*shipping_methods";
+const TILLTAP_POLL_INTERVAL_MS = 2_000;
+const TILLTAP_TRUSTED_ORIGIN = import.meta.env.VITE_TILLTAP_ORIGIN;
+
+export type TilltapPaymentState = {
+  phase: "pending" | "review" | "failure";
+  checkoutUrl?: string;
+  expiresAt?: string;
+  orderDisplayId?: number;
+  providerConfirmed?: boolean;
+};
+
+const waitForTilltapPoll = (signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const handleAbort = () => {
+      window.clearTimeout(timeoutId);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timeoutId = window.setTimeout(() => {
+      signal.removeEventListener("abort", handleAbort);
+      resolve();
+    }, TILLTAP_POLL_INTERVAL_MS);
+    signal.addEventListener("abort", handleAbort, { once: true });
+  });
 
 const iconByType = {
   cash: Banknote,
@@ -35,6 +71,9 @@ const iconByType = {
 const usePaymentMethodDisplay = (selectedPaymentMethod?: PaymentMethod) => {
   const { data: store } = useQueryStore();
   return useMemo(() => {
+    if (selectedPaymentMethod === TILLTAP_PROVIDER_ID) {
+      return { label: t("checkout.tilltap.pilot_title"), icon: CreditCard };
+    }
     const methods = getPaymentMethods(store);
     const found = methods.find((m) => m.id === selectedPaymentMethod);
     if (found) {
@@ -221,22 +260,42 @@ const usePaymentModal = (
   // Total snapshotted at submit — clearing draftOrderId mid-flow would show 0.00 otherwise.
   const [frozenTotal, setFrozenTotal] = useState<number | null>(null);
   const [tilltapPayment, setTilltapPayment] =
-    useState<TilltapPaymentPresentation | null>(null);
+    useState<TilltapPaymentState | null>(null);
+  const tilltapPollAbortRef = useRef<AbortController | null>(null);
 
   const { printOrderReceipt, openCashDrawer, getDefaultPrinter } = usePrinterService();
   const clearItems = useCartStore((state) => state.clearItems);
   const setDraftOrderId = useCartStore((state) => state.setDraftOrderId);
-  const { selectedPaymentMethod, setPaymentMethod } = useCheckout();
+  const updateMetadata = useCartStore((state) => state.updateMetadata);
+  const pendingAsyncOrderId = useCartStore(
+    (state) => state.metadata.async_payment_order_id
+  );
+  const pendingAsyncSessionId = useCartStore(
+    (state) => state.metadata.async_payment_session_id
+  );
+  const pendingAsyncProviderId = useCartStore(
+    (state) => state.metadata.async_payment_provider_id
+  );
+  const {
+    selectedPaymentMethod,
+    setPaymentMethod,
+    currency: checkoutCurrency,
+  } = useCheckout();
   const { isOpen: registerOpen, session: registerSession } = useRegister();
   // Stamp orders with the active register session so cash reconciliation can
   // attribute them exactly (falls back to the created_at window when absent).
   const registerSessionId = registerOpen ? registerSession?.id : undefined;
   const items = useCartStore((state) => state.items);
 
-  // Get payment method display info
-  const paymentMethodInfo = usePaymentMethodDisplay(selectedPaymentMethod);
   const { data: store } = useQueryStore();
   const isCashType = getMethodType(store, selectedPaymentMethod) === "cash";
+  const isTilltapPayment =
+    (selectedPaymentMethod === TILLTAP_PROVIDER_ID &&
+      getPaymentStrategy(selectedPaymentMethod) === "asynchronous") ||
+    pendingAsyncProviderId === TILLTAP_PROVIDER_ID;
+  const paymentMethodInfo = usePaymentMethodDisplay(
+    isTilltapPayment ? TILLTAP_PROVIDER_ID : selectedPaymentMethod
+  );
 
   // Compose sub-hooks
   const { draftOrder, fetchDraftOrder } = useDraftOrderState(
@@ -244,6 +303,13 @@ const usePaymentModal = (
     isOpen
   );
   const calculations = useOrderCalculations(draftOrder);
+
+  useEffect(
+    () => () => {
+      tilltapPollAbortRef.current?.abort();
+    },
+    []
+  );
 
   // Swedish rounding: cash tenders round to the configured increment (card stays exact);
   // Medusa's total is untouched — the rounded figure drives change + reconciliation metadata.
@@ -265,8 +331,7 @@ const usePaymentModal = (
     billCounts,
     quickAmounts,
   } = useCashPayment(cashTotal, isCashType);
-  const { processPaymentCollection, processFulfillment, refreshTilltapPayment } =
-    useOrderProcessing();
+  const { processPaymentCollection, processFulfillment } = useOrderProcessing();
 
   // While processing, the draft order is cleared (so its total reads 0). Show the
   // frozen snapshot taken at submit time so the amount never flashes to 0.00.
@@ -344,6 +409,195 @@ const usePaymentModal = (
     ]
   );
 
+  const finalizePaidOrder = useCallback(
+    async (
+      order: AdminOrder,
+      paymentMethod: PaymentMethod | undefined
+    ): Promise<boolean> =>
+      finalizeOrderIfPaid(order, async (paidOrder) => {
+        await processFulfillment(paidOrder);
+
+        try {
+          await getSdk().admin.order.complete(paidOrder.id, {});
+        } catch {
+          // Completion is non-fatal after payment and fulfillment have succeeded.
+        }
+
+        await cleanupAfterOrder(paidOrder, paymentMethod);
+      }),
+    [cleanupAfterOrder, processFulfillment]
+  );
+
+  const monitorTilltapPayment = useCallback(
+    async (
+      initialOrder: AdminOrder,
+      session: PaymentSessionSnapshot
+    ): Promise<AdminOrder | null> => {
+      let presentation;
+      try {
+        presentation = getTilltapPresentation(
+          session,
+          TILLTAP_TRUSTED_ORIGIN,
+          initialOrder.total
+        );
+        validateTilltapAttemptPrerequisites(
+          initialOrder.currency_code,
+          initialOrder.total,
+          TILLTAP_TRUSTED_ORIGIN
+        );
+      } catch {
+        setTilltapPayment({
+          phase: "review",
+          orderDisplayId: initialOrder.display_id,
+        });
+        return null;
+      }
+      const expiresAtIso = new Date(presentation.expiresAt).toISOString();
+      const releaseResolvedCart = (): void => {
+        clearItems();
+        setPaymentMethod(undefined);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+      };
+      const leaveCapturedForReview = (capturedOrder: AdminOrder): null => {
+        releaseResolvedCart();
+        setTilltapPayment({
+          phase: "review",
+          checkoutUrl: presentation.checkoutUrl,
+          expiresAt: expiresAtIso,
+          orderDisplayId: capturedOrder.display_id,
+          providerConfirmed: true,
+        });
+        return null;
+      };
+
+      setFrozenTotal(initialOrder.total || session.amount);
+      setTilltapPayment({
+        phase: "pending",
+        checkoutUrl: presentation.checkoutUrl,
+        expiresAt: expiresAtIso,
+        orderDisplayId: initialOrder.display_id,
+      });
+
+      tilltapPollAbortRef.current?.abort();
+      const controller = new AbortController();
+      tilltapPollAbortRef.current = controller;
+      let providerConfirmed = false;
+
+      try {
+        while (!controller.signal.aborted) {
+          const sdk = getSdk();
+          const { order: medusaOrder } = await sdk.admin.order.retrieve(
+            initialOrder.id,
+            { fields: PAYMENT_ORDER_FIELDS }
+          );
+          if (canFinalizeOrder(medusaOrder)) {
+            return leaveCapturedForReview(medusaOrder);
+          }
+
+          const reachedLocalExpiry = Date.now() >= presentation.expiresAt;
+          const capabilityStatus = await fetchTilltapCapabilityStatus(
+            presentation,
+            controller.signal
+          );
+
+          if (capabilityStatus === "confirmed") {
+            providerConfirmed = true;
+            setTilltapPayment({
+              phase: "pending",
+              checkoutUrl: presentation.checkoutUrl,
+              expiresAt: expiresAtIso,
+              orderDisplayId: initialOrder.display_id,
+              providerConfirmed: true,
+            });
+
+            // Medusa's worker is the sole authorizer. The POS only observes the
+            // order so it cannot race the reconciliation workflow.
+          }
+
+          // Re-read after the provider capability and any authorization/capture
+          // mutation. This is also the final Medusa check at local expiry.
+          const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+            initialOrder.id,
+            { fields: PAYMENT_ORDER_FIELDS }
+          );
+          if (canFinalizeOrder(refreshedOrder)) {
+            return leaveCapturedForReview(refreshedOrder);
+          }
+
+          if (reachedLocalExpiry) {
+            if (!providerConfirmed && capabilityStatus !== "review") {
+              releaseResolvedCart();
+            }
+            setTilltapPayment({
+              phase:
+                providerConfirmed || capabilityStatus === "review"
+                  ? "review"
+                  : "failure",
+              checkoutUrl: presentation.checkoutUrl,
+              expiresAt: expiresAtIso,
+              orderDisplayId: initialOrder.display_id,
+              providerConfirmed,
+            });
+            return null;
+          }
+
+          if (capabilityStatus === "review" || capabilityStatus === "failed") {
+            if (capabilityStatus === "failed" && !providerConfirmed) {
+              releaseResolvedCart();
+            }
+            setTilltapPayment({
+              phase:
+                capabilityStatus === "review" || providerConfirmed
+                  ? "review"
+                  : "failure",
+              checkoutUrl: presentation.checkoutUrl,
+              expiresAt: expiresAtIso,
+              orderDisplayId: initialOrder.display_id,
+              providerConfirmed,
+            });
+            return null;
+          }
+
+          await waitForTilltapPoll(controller.signal);
+        }
+      } catch {
+        if (controller.signal.aborted) {
+          return null;
+        }
+        // A capability request can fail exactly at expiry. It was attempted;
+        // perform the required final authoritative Medusa check before review.
+        try {
+          const { order: refreshedOrder } = await getSdk().admin.order.retrieve(
+            initialOrder.id,
+            { fields: PAYMENT_ORDER_FIELDS }
+          );
+          if (canFinalizeOrder(refreshedOrder)) {
+            return leaveCapturedForReview(refreshedOrder);
+          }
+        } catch {
+          // The outcome remains unresolved and must be reviewed.
+        }
+        void logger.warn(
+          "Tilltap status could not be established; leaving the order for review"
+        );
+        setTilltapPayment({
+          phase: "review",
+          checkoutUrl: presentation.checkoutUrl,
+          expiresAt: expiresAtIso,
+          orderDisplayId: initialOrder.display_id,
+          providerConfirmed,
+        });
+      } finally {
+        if (tilltapPollAbortRef.current === controller) {
+          tilltapPollAbortRef.current = null;
+        }
+      }
+
+      return null;
+    },
+    [clearItems, setPaymentMethod]
+  );
+
   // Main payment processing flow
   const handleProcessPayment =
     useCallback(async (): Promise<AdminOrder | null> => {
@@ -364,6 +618,25 @@ const usePaymentModal = (
         playErrorSound();
         handleErrorToast("Insufficient payment amount");
         return null;
+      }
+
+      const selectedStrategy = getPaymentStrategy(selectedPaymentMethod);
+      if (selectedStrategy === "asynchronous") {
+        try {
+          validateTilltapAttemptPrerequisites(
+            draftOrder?.currency_code ?? checkoutCurrency,
+            calculations.total,
+            TILLTAP_TRUSTED_ORIGIN
+          );
+        } catch (error) {
+          playErrorSound();
+          handleErrorToast(
+            error instanceof Error
+              ? error.message
+              : "Tilltap checkout prerequisites are invalid"
+          );
+          return null;
+        }
       }
 
       submissionRef.current = true;
@@ -407,22 +680,77 @@ const usePaymentModal = (
         setDraftOrderId(null);
         orderConversionDone = true;
 
+        if (selectedStrategy === "asynchronous") {
+          // Persist the consumed order before attempting provider initialization.
+          // If initialization becomes ambiguous, reopening Payment recovers this
+          // order and never creates a replacement payment session.
+          updateMetadata({
+            async_payment_order_id: convertedOrder.id,
+            async_payment_session_id: undefined,
+            async_payment_provider_id: selectedPaymentMethod,
+          });
+        }
+
         // Step 3: Fetch full order with expanded payment/fulfillment fields
         const { order } = await sdk.admin.order.retrieve(convertedOrder.id, {
-          fields:
-            "*payment_collections,*payment_collections.payments,*summary,*fulfillments,*items,*customer,*sales_channel,*shipping_methods",
+          fields: PAYMENT_ORDER_FIELDS,
         });
+
+        if (selectedStrategy === "asynchronous") {
+          validateTilltapAttemptPrerequisites(
+            order.currency_code,
+            order.total,
+            TILLTAP_TRUSTED_ORIGIN
+          );
+        }
 
         // Step 4: Process payment collection
         let finalOrder = order;
         try {
-          const paymentResult = await processPaymentCollection(order, selectedPaymentMethod);
-          if (paymentResult.kind === "pending") {
-            setTilltapPayment(paymentResult.presentation);
-            toast.info("Tilltap checkout created. Ask the customer to scan the QR code.");
-            return null;
+          const paymentResult = await processPaymentCollection(
+            order,
+            selectedPaymentMethod
+          );
+
+          if ("alreadySettled" in paymentResult) {
+            const { order: refreshed } = await sdk.admin.order.retrieve(order.id, {
+              fields: PAYMENT_ORDER_FIELDS,
+            });
+            finalOrder = refreshed;
+          } else if (paymentResult.strategy === "asynchronous") {
+            updateMetadata({
+              async_payment_order_id: order.id,
+              async_payment_session_id: paymentResult.session.id,
+              async_payment_provider_id: selectedPaymentMethod,
+            });
+            const settledOrder = await monitorTilltapPayment(
+              order,
+              paymentResult.session
+            );
+            if (!settledOrder) return null;
+            finalOrder = settledOrder;
+          } else {
+            const { order: refreshed } = await sdk.admin.order.retrieve(order.id, {
+              fields: PAYMENT_ORDER_FIELDS,
+            });
+            finalOrder = refreshed;
+            if (!canFinalizeOrder(finalOrder)) {
+              throw new Error("Medusa has not captured the payment");
+            }
           }
         } catch (paymentError) {
+          if (selectedStrategy === "asynchronous") {
+            void logger.warn(
+              "Tilltap initialization outcome is unresolved; payment attempt will not be retried"
+            );
+            setTilltapPayment({
+              phase: "review",
+              orderDisplayId: order.display_id,
+            });
+            void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+            return null;
+          }
+
           // Surface the real backend error so capture failures are diagnosable.
           void logger.error(`processPaymentCollection failed: ${safeStringify(paymentError)}`);
           // Re-fetch the order to check whether payment was captured on the backend
@@ -432,14 +760,11 @@ const usePaymentModal = (
             const { order: refreshed } = await sdk.admin.order.retrieve(order.id, {
               fields: "payment_status",
             });
-            paymentWasCaptured =
-              refreshed.payment_status === "captured" ||
-              refreshed.payment_status === "authorized";
+            paymentWasCaptured = canFinalizeOrder(refreshed);
 
             if (paymentWasCaptured) {
               const { order: fullRefreshed } = await sdk.admin.order.retrieve(order.id, {
-                fields:
-                  "*payment_collections,*payment_collections.payments,*summary,*fulfillments,*items,*customer,*sales_channel,*shipping_methods",
+                fields: PAYMENT_ORDER_FIELDS,
               });
               finalOrder = fullRefreshed;
             }
@@ -467,21 +792,35 @@ const usePaymentModal = (
           }
         }
 
-        // Step 5: Process fulfillment (errors are non-fatal — shows toast but doesn't throw)
-        await processFulfillment(finalOrder);
-
-        // Step 6: Complete the order (non-fatal)
-        try {
-          await sdk.admin.order.complete(finalOrder.id, {});
-        } catch {
-          // non-fatal
+        // Tilltap capture is reconciliation evidence only in this pilot. Without
+        // a signed outbox and merchant re-verification, never enter automatic
+        // fulfillment, completion, receipt, hardware, success, or cleanup paths.
+        if (selectedStrategy === "asynchronous") {
+          setTilltapPayment({
+            phase: "review",
+            orderDisplayId: finalOrder.display_id,
+            providerConfirmed: canFinalizeOrder(finalOrder),
+          });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+          return null;
         }
 
-        // Step 7: Clean up and finalize
-        await cleanupAfterOrder(finalOrder, selectedPaymentMethod);
+        if (
+          !(await finalizePaidOrder(finalOrder, selectedPaymentMethod))
+        ) {
+          throw new Error("Medusa has not captured the payment");
+        }
         return finalOrder;
 
       } catch (error) {
+        if (orderConversionDone && selectedStrategy === "asynchronous") {
+          setTilltapPayment((current) =>
+            current ?? { phase: "review" }
+          );
+          void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+          return null;
+        }
+
         playErrorSound();
         handleErrorToast(
           error instanceof Error ? error.message : "Failed to create order. Please try again."
@@ -504,18 +843,98 @@ const usePaymentModal = (
       isCashType,
       roundingActive,
       selectedPaymentMethod,
+      draftOrder,
+      checkoutCurrency,
       customerPaid,
       calculations.total,
       processPaymentCollection,
-      processFulfillment,
-      cleanupAfterOrder,
+      monitorTilltapPayment,
+      finalizePaidOrder,
       clearItems,
       resetCashState,
       setPaymentMethod,
       setDraftOrderId,
+      updateMetadata,
       registerSessionId,
       onClose,
     ]);
+
+  useEffect(() => {
+    if (
+      !isOpen ||
+      draftOrderId ||
+      !pendingAsyncOrderId ||
+      pendingAsyncProviderId !== TILLTAP_PROVIDER_ID ||
+      submissionRef.current
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    submissionRef.current = true;
+    setIsProcessing(true);
+
+    queueMicrotask(() => {
+      void (async () => {
+        try {
+          const sdk = getSdk();
+          const { order } = await sdk.admin.order.retrieve(
+            pendingAsyncOrderId,
+            { fields: PAYMENT_ORDER_FIELDS }
+          );
+          if (cancelled) return;
+
+          setFrozenTotal(order.total || 0);
+          if (canFinalizeOrder(order)) {
+            clearItems();
+            setPaymentMethod(undefined);
+            void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
+            setTilltapPayment({
+              phase: "review",
+              orderDisplayId: order.display_id,
+              providerConfirmed: true,
+            });
+            return;
+          }
+
+          const session = findTilltapPaymentSession(
+            order,
+            pendingAsyncSessionId
+          );
+          if (!session) {
+            setTilltapPayment({
+              phase: "review",
+              orderDisplayId: order.display_id,
+            });
+            return;
+          }
+          await monitorTilltapPayment(order, session);
+        } catch {
+          if (!cancelled) {
+            setTilltapPayment({ phase: "review" });
+          }
+        } finally {
+          if (!cancelled) setIsProcessing(false);
+          submissionRef.current = false;
+        }
+      })();
+    });
+
+    return () => {
+      cancelled = true;
+      tilltapPollAbortRef.current?.abort();
+      submissionRef.current = false;
+    };
+  }, [
+    isOpen,
+    draftOrderId,
+    pendingAsyncOrderId,
+    pendingAsyncSessionId,
+    pendingAsyncProviderId,
+    monitorTilltapPayment,
+    clearItems,
+    setPaymentMethod,
+  ]);
 
   // Pay later: fulfill but skip capture — the uncaptured order IS the "outstanding" signal,
   // so never cancel on failure and never complete.
@@ -609,61 +1028,15 @@ const usePaymentModal = (
 
   // Handle modal close
   const handleClose = useCallback(() => {
-    if (tilltapPayment) {
-      // The draft has already become a real Medusa order. Never leave its items
-      // in the local cart where they could be rung a second time.
-      clearItems();
-      setPaymentMethod(undefined);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
-    }
+    if (isProcessing) return;
+    tilltapPollAbortRef.current?.abort();
     resetCashState();
     setFrozenTotal(null);
     setTilltapPayment(null);
     setShowConfirmation(false);
     setShowPayLaterConfirmation(false);
     onClose?.();
-  }, [tilltapPayment, clearItems, setPaymentMethod, resetCashState, onClose]);
-
-  const handleCheckTilltapPayment = useCallback(async (): Promise<void> => {
-    if (!tilltapPayment || submissionRef.current) return;
-
-    submissionRef.current = true;
-    setIsProcessing(true);
-    try {
-      const refreshed = await refreshTilltapPayment(tilltapPayment);
-      setTilltapPayment(refreshed.presentation);
-      const { tilltapStatus } = refreshed.presentation;
-
-      if (refreshed.isAuthorized || refreshed.paymentStatus === "captured") {
-        // The controlled backend intentionally blocks fulfillment and order
-        // completion for this pilot, even after sandbox evidence is captured.
-        clearItems();
-        setPaymentMethod(undefined);
-        void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
-        toast.success("Tilltap sandbox payment verified. Goods release remains blocked.");
-        playSuccessSound();
-        return;
-      }
-
-      if (tilltapStatus === "PAID") {
-        toast.warning(
-          "Tilltap reports sandbox payment evidence, but Medusa correctly kept the order awaiting payment."
-        );
-      } else if (tilltapStatus === "REVIEW") {
-        toast.warning("Tilltap requires operator review. Do not retry or release goods.");
-      } else {
-        toast.info(`Tilltap checkout is ${tilltapStatus.toLowerCase().replace(/_/g, " ")}.`);
-      }
-    } catch (error) {
-      playErrorSound();
-      handleErrorToast(
-        error instanceof Error ? error.message : "Could not check Tilltap payment status."
-      );
-    } finally {
-      submissionRef.current = false;
-      setIsProcessing(false);
-    }
-  }, [tilltapPayment, refreshTilltapPayment, clearItems, setPaymentMethod]);
+  }, [isProcessing, resetCashState, onClose]);
 
   // Open the pay-later confirmation dialog.
   const handleDeliverPayLaterClick = useCallback(() => {
@@ -681,8 +1054,13 @@ const usePaymentModal = (
 
   // Handle complete button click
   const handleCompleteClick = useCallback(() => {
-    const isTilltapPayment = selectedPaymentMethod === "pp_tilltap_default";
-    const isCardPayment = !isCashType && !isTilltapPayment;
+    if (isTilltapPayment) {
+      void handleProcessPayment().then((result) => {
+        if (result) handleClose();
+      });
+      return;
+    }
+    const isCardPayment = !isCashType;
 
     if (isCardPayment) {
       setShowConfirmation(true);
@@ -693,7 +1071,31 @@ const usePaymentModal = (
         }
       });
     }
-  }, [isCashType, selectedPaymentMethod, handleProcessPayment, handleClose]);
+  }, [isTilltapPayment, isCashType, handleProcessPayment, handleClose]);
+
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !isTilltapPayment ||
+      tilltapPayment ||
+      !draftOrder ||
+      submissionRef.current ||
+      pendingAsyncOrderId
+    ) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      if (!submissionRef.current) void handleProcessPayment();
+    });
+  }, [
+    isOpen,
+    isTilltapPayment,
+    tilltapPayment,
+    draftOrder,
+    pendingAsyncOrderId,
+    handleProcessPayment,
+  ]);
 
   // Handle complete payment with modal close (legacy, kept for backwards compatibility)
   const handleCompletePayment = useCallback(async (): Promise<void> => {
@@ -741,6 +1143,7 @@ const usePaymentModal = (
     items,
     paymentMethodInfo,
     isCashPayment: isCashType,
+    isTilltapPayment,
 
     // Functions
     handleCashValueChange,
@@ -752,7 +1155,6 @@ const usePaymentModal = (
     handleCompletePayment,
     handleCompleteClick,
     handleConfirmPayment,
-    handleCheckTilltapPayment,
     setShowConfirmation,
     handleDeliverPayLater,
     handleDeliverPayLaterClick,

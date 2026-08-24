@@ -53,11 +53,7 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@tauri-apps/plugin-opener"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "@tauri-apps/plugin-process"
-        update-types: ["version-update:semver-major"]
       - dependency-name: "@tauri-apps/plugin-store"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@tauri-apps/plugin-updater"
         update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 10
 

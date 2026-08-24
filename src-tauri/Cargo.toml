@@ -1,8 +1,8 @@
 [package]
 name = "medusa-pos"
 version = "0.4.1"
-description = "Point of Sale application for MedusaJS"
-authors = ["Nari Solutions"]
+description = "Tilltap point of sale application for MedusaJS"
+authors = ["Tilltap"]
 edition = "2021"
 
 [features]
@@ -37,8 +37,6 @@ tauri-plugin-fs = "2.4"
 tauri-plugin-dialog = "2.7"
 log = "0.4.31"
 tauri-plugin-log = "2.9"
-tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
 anyhow = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -55,4 +53,3 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Gdi",
     "Win32_Security",
 ] }
-

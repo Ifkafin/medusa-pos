@@ -10,6 +10,10 @@ import { useQueryStockLocation } from "@/hooks/queries/useQueryStockLocation";
 import { useQueryShippingOption } from "@/hooks/queries/useQueryShippingOption";
 import storage from "@/utils/storage";
 import { handleErrorToast, getApiErrorMessage } from "@/utils/helpers";
+import { requireAuthoritativeGoodsRelease } from "@/utils/pos/payment/strategies";
+
+const GOODS_RELEASE_FIELDS =
+  "id,payment_status,metadata,*payment_collections.payment_sessions";
 
 interface FulfillmentItem {
   id: string;
@@ -104,6 +108,13 @@ export const useFulfillmentDialog = (
 
     try {
       const sdk = getSdk();
+      await requireAuthoritativeGoodsRelease(async () => {
+        const { order: refreshedOrder } = await sdk.admin.order.retrieve(
+          order.id,
+          { fields: GOODS_RELEASE_FIELDS }
+        );
+        return refreshedOrder;
+      });
 
       // Create fulfillment
       const fulfillmentPayload: {
@@ -261,4 +272,3 @@ export const useFulfillmentDialog = (
     preferredLocationName,
   };
 };
-
